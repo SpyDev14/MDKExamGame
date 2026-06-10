@@ -1,0 +1,884 @@
+(function() {
+    'use strict';
+
+    // ===========================
+    // КОНСТАНТЫ И НАСТРОЙКИ ИГРЫ
+    // ===========================
+
+    // ------ Размеры мира и камеры ------
+    const WORLD_WIDTH = 4000;
+    const WORLD_HEIGHT = 4000;
+    const CAM_VIEW_WIDTH = 1000;   // canvas.width
+    const CAM_VIEW_HEIGHT = 700;    // canvas.height
+
+    // ------ Игрок ------
+    const PLAYER_RADIUS = 16;
+    const PLAYER_COLOR = '#2ad4ff';
+    const PLAYER_MAX_SPEED = 340;
+    const PLAYER_ACCEL_TIME = 0.25;              // секунд до максимальной скорости
+    const PLAYER_ACCEL = PLAYER_MAX_SPEED / PLAYER_ACCEL_TIME;
+    const RECOIL_FORCE = 600;                    // отдача от выстрела
+    const KNOCKBACK_FORCE = 900;                 // отбрасывание при укусе
+
+    // ------ Здоровье и неуязвимость ------
+    const START_HEALTH = 5;
+    const INVINCIBLE_DURATION = 0.75;             // секунды после получения урона
+
+    // ------ Дробовик ------
+    const SHOT_COOLDOWN = 0.55;                   // секунды между выстрелами
+    const PELLET_COUNT_MIN = 5;
+    const PELLET_COUNT_MAX = 8;
+    const PELLET_RADIUS = 4;
+    const PELLET_SPEED = 430;
+    const PELLET_DISTANCE = 280;                  // Дистанция полёта пули
+    const PELLET_LIFESPAN = PELLET_DISTANCE / PELLET_SPEED; // секунды жизни пули
+    const PELLET_COLOR = '#FFD966';
+    const SPREAD_ANGLE_DEG = 25;
+    const SPREAD_ANGLE_RAD = SPREAD_ANGLE_DEG * Math.PI / 180;
+
+    // ------ Враги (зомби) ------
+    const ENEMY_RADIUS = 13;
+    const ENEMY_COLOR = '#4CAF50';
+    const ENEMY_BASE_SPEED = 112;
+    const ACCELERATION_RADIUS = 9 * PLAYER_RADIUS; // враги ускоряются ближе к игроку
+    const ENEMY_ACCEL_FACTOR = 1.75;
+    const ENEMY_HP = 1;                           // здоровье врага (1 = убиваются с одного попадания)
+
+    // ------ Сложность (спавн) ------
+    const SPAWN_INTERVAL_START = 1.5;      // секунд между спавнами в начале (редко)
+    const SPAWN_INTERVAL_END = 0.35;       // финальный минимальный интервал (макс. сложность)
+    const SPAWN_RAMP_UP_TIME = 120;        // время в секундах, за которое интервал достигает SPAWN_INTERVAL_END
+    // Параметр экспоненциального затухания: через SPAWN_RAMP_UP_TIME разница сокращается до 1% (epsilon)
+    const SPAWN_EPSILON = 0.01;            // 1% от начальной разницы — интервал практически равен конечному
+    // Предрасчёт константы времени tau для экспоненты (не меняется во время игры)
+    const SPAWN_TAU = -SPAWN_RAMP_UP_TIME / Math.log(SPAWN_EPSILON);
+    const SPAWN_EXTRA_RADIUS = 250;        // враги появляются за пределами экрана
+
+    // ------ Визуальные настройки ------
+    const BACKGROUND_COLOR = '#151e27';
+    const GRID_COLOR = '#253644';
+    const GRID_STEP = 60;
+    const HEALTH_BAR_WIDTH = 40;
+    const HEALTH_BAR_HEIGHT = 7;
+    const HEALTH_BAR_OFFSET_Y = -32;
+
+    // ------ Ключи для localStorage ------
+    const HIGHSCORE_KEY = 'shotgun_highscore';
+    const VOLUME_KEY = 'master_volume';
+
+    // ===========================
+    // DOM-ЭЛЕМЕНТЫ
+    // ===========================
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const uiScoreSpan = document.getElementById('uiScore');
+    const uiBestSpan = document.getElementById('uiBest');
+    const gameoverPanel = document.getElementById('gameoverPanel');
+    const finalScoreSpan = document.getElementById('finalScoreSpan');
+    const finalBestSpan = document.getElementById('finalBestSpan');
+    const restartBtn = document.getElementById('restartButton');
+    const volumeSlider = document.getElementById('volumeSlider');
+    const volumeValueSpan = document.getElementById('volumeValue');
+
+    // ===========================
+    // ЗВУКОВОЙ МЕНЕДЖМЕНТ
+    // ===========================
+    let masterVolume = 0.7;       // по умолчанию 70%
+    let audioEnabled = false;
+    let bgMusic = null;
+
+    function loadVolumeSetting() {
+        try {
+            const saved = localStorage.getItem(VOLUME_KEY);
+            if (saved !== null) {
+                let vol = parseFloat(saved);
+                if (!isNaN(vol) && vol >= 0 && vol <= 1) {
+                    masterVolume = vol;
+                }
+            }
+        } catch(e) { console.warn("volume load error", e); }
+        // Обновляем ползунок UI
+        const percent = Math.round(masterVolume * 100);
+        volumeSlider.value = percent;
+        volumeValueSpan.textContent = percent + '%';
+    }
+
+    function saveVolumeSetting() {
+        try {
+            localStorage.setItem(VOLUME_KEY, masterVolume);
+        } catch(e) { console.warn("volume save error", e); }
+    }
+
+    function setMasterVolume(value01) {
+        masterVolume = Math.min(1.0, Math.max(0, value01));
+        const percent = Math.round(masterVolume * 100);
+        volumeSlider.value = percent;
+        volumeValueSpan.textContent = percent + '%';
+        saveVolumeSetting();
+        // Применяем к текущей фоновой музыке, если она играет
+        if (bgMusic) {
+            bgMusic.volume = masterVolume * 0.65;   // базовая громкость музыки 0.65
+        }
+    }
+
+    // Обработчик ползунка
+    volumeSlider.addEventListener('input', (e) => {
+        const val = parseInt(e.target.value, 10);
+        const vol = val / 100;
+        setMasterVolume(vol);
+    });
+
+    // ===========================
+    // ЗВУКИ
+    // ===========================
+    const AUDIO_PATHS = {
+        shotgun: "resources/audio/shotgun-shot.ogg",
+        bite: "resources/audio/bite.ogg",
+        theme: "resources/audio/main-theme.ogg",
+        zombie: [
+            "resources/audio/zombie-1.ogg",
+            "resources/audio/zombie-2.ogg",
+            "resources/audio/zombie-3.ogg"
+        ],
+        bodyfall: [
+            "resources/audio/bodyfall-1.ogg",
+            "resources/audio/bodyfall-2.ogg",
+            "resources/audio/bodyfall-3.ogg",
+            "resources/audio/bodyfall-4.ogg"
+        ]
+    };
+
+    function playSound(url, baseVolume = 0.7) {
+        if (!audioEnabled) return;
+        try {
+            const audio = new Audio(url);
+            const finalVolume = baseVolume * masterVolume;
+            audio.volume = Math.min(1.0, Math.max(0, finalVolume));
+            audio.play().catch(e => console.debug("Sound play failed:", e));
+        } catch (e) {}
+    }
+
+    function playShotgunSound()      { playSound(AUDIO_PATHS.shotgun, 0.7); }
+    function playBiteSound()         { playSound(AUDIO_PATHS.bite, 1.0); }
+    function playRandomBodyfallSound() {
+        const idx = Math.floor(Math.random() * AUDIO_PATHS.bodyfall.length);
+        playSound(AUDIO_PATHS.bodyfall[idx], 0.85);
+    }
+    function playRandomZombieSound(distance) {
+        if (!audioEnabled) return;
+        const minDist = 2 * PLAYER_RADIUS;
+        const maxDist = CAM_VIEW_HEIGHT;
+        let volume = 0;
+        if (distance <= minDist) volume = 1.0;
+        else if (distance >= maxDist) volume = 0;
+        else volume = 1.0 * (1 - (distance - minDist) / (maxDist - minDist));
+        volume = Math.min(1.0, Math.max(0, volume));
+        if (volume <= 0.05) return;
+        const idx = Math.floor(Math.random() * AUDIO_PATHS.zombie.length);
+        playSound(AUDIO_PATHS.zombie[idx], volume * 0.9);
+    }
+
+    function startBackgroundMusic() {
+        if (!audioEnabled || bgMusic) return;
+        try {
+            bgMusic = new Audio(AUDIO_PATHS.theme);
+            bgMusic.loop = true;
+            bgMusic.volume = masterVolume * 0.65;   // базовый уровень музыки 65% от мастера
+            bgMusic.play().catch(e => console.debug("Music autoplay blocked"));
+        } catch (e) {}
+    }
+
+    function stopBackgroundMusic() {
+        if (bgMusic) {
+            bgMusic.pause();
+            bgMusic.currentTime = 0;
+        }
+    }
+
+    function restartBackgroundMusic() {
+        if (!audioEnabled) return;
+        if (bgMusic) {
+            bgMusic.pause();
+            bgMusic.currentTime = 0;
+            bgMusic.volume = masterVolume * 0.65;
+            bgMusic.play().catch(e => console.debug("Music restart failed"));
+        } else {
+            startBackgroundMusic();
+        }
+    }
+
+    function updateBackgroundMusicVolume() {
+        if (bgMusic) {
+            bgMusic.volume = masterVolume * 0.65;
+        }
+    }
+
+    function enableAudio() {
+        if (!audioEnabled) {
+            audioEnabled = true;
+            startBackgroundMusic();
+        }
+    }
+
+    // ===========================
+    // ИГРОВОЕ СОСТОЯНИЕ
+    // ===========================
+    let gameActive = true;
+    let health = START_HEALTH;
+    let score = 0;
+    let highScore = 0;
+    let player = {
+        x: WORLD_WIDTH / 2,
+        y: WORLD_HEIGHT / 2,
+        radius: PLAYER_RADIUS,
+        velX: 0,
+        velY: 0
+    };
+    let enemies = [];         // массив зомби
+    let pellets = [];         // массив пуль
+    let lastSpawnTime = 0;
+    let invincibleTimer = 0;
+    let gameTimeElapsed = 0;  // для нарастания сложности
+
+    // Для прицела: координаты мыши в мире
+    let mouseWorldX = player.x;
+    let mouseWorldY = player.y;
+    let mouseInsideCanvas = false;
+    let rawMouseScreenX = 0, rawMouseScreenY = 0;
+
+    // Камера
+    let cameraX = 0, cameraY = 0;
+
+    // Тайминги
+    let lastShotTime = 0;
+
+    // ===========================
+    // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+    // ===========================
+    function clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
+    }
+
+    function limitVelocity(velX, velY, maxSpeed) {
+        const speed = Math.hypot(velX, velY);
+        if (speed > maxSpeed) {
+            const factor = maxSpeed / speed;
+            return { vx: velX * factor, vy: velY * factor };
+        }
+        return { vx: velX, vy: velY };
+    }
+
+    function worldToScreen(worldX, worldY) {
+        return { x: worldX - cameraX, y: worldY - cameraY };
+    }
+
+    function screenToWorld(screenX, screenY) {
+        return { x: screenX + cameraX, y: screenY + cameraY };
+    }
+
+    // ------ Работа с рекордами ------
+    function loadHighScore() {
+        try {
+            const saved = localStorage.getItem(HIGHSCORE_KEY);
+            if (saved !== null) highScore = parseInt(saved, 10) || 0;
+            uiBestSpan.textContent = highScore;
+        } catch(e) { console.warn("localStorage error", e); }
+    }
+
+    function saveHighScoreIfNeeded(currentScore) {
+        if (currentScore > highScore) {
+            highScore = currentScore;
+            uiBestSpan.textContent = highScore;
+            try {
+                localStorage.setItem(HIGHSCORE_KEY, highScore);
+            } catch(e) { console.warn("save failed", e); }
+        }
+    }
+
+    function updateUI() {
+        uiScoreSpan.textContent = score;
+        uiBestSpan.textContent = highScore;
+    }
+
+    // ------ Панель Game Over ------
+    function showGameOverUI() {
+        finalScoreSpan.textContent = score;
+        finalBestSpan.textContent = highScore;
+        gameoverPanel.style.visibility = "visible";
+        stopBackgroundMusic();
+    }
+
+    function hideGameOverUI() {
+        gameoverPanel.style.visibility = "hidden";
+    }
+
+    // ------ Сложность спавна ------
+    function getCurrentSpawnInterval() {
+        const t = Math.min(gameTimeElapsed, SPAWN_RAMP_UP_TIME);
+        // Экспоненциальная интерполяция: interval = end + (start - end) * exp(-t / tau)
+        const ratio = Math.exp(-t / SPAWN_TAU);
+        let interval = SPAWN_INTERVAL_END + (SPAWN_INTERVAL_START - SPAWN_INTERVAL_END) * ratio;
+        // Защита от выхода за границы (гарантируем, что не станет меньше конечного)
+        if (interval < SPAWN_INTERVAL_END) interval = SPAWN_INTERVAL_END;
+        return interval;
+    }
+
+    // ------ Обновление камеры (следим за игроком) ------
+    function updateCamera() {
+        let targetX = player.x - CAM_VIEW_WIDTH / 2;
+        let targetY = player.y - CAM_VIEW_HEIGHT / 2;
+        targetX = clamp(targetX, 0, WORLD_WIDTH - CAM_VIEW_WIDTH);
+        targetY = clamp(targetY, 0, WORLD_HEIGHT - CAM_VIEW_HEIGHT);
+        cameraX = targetX;
+        cameraY = targetY;
+    }
+
+    // ------ Спавн одного врага за пределами видимости ------
+    function spawnEnemy() {
+        const viewLeft = cameraX, viewRight = cameraX + CAM_VIEW_WIDTH;
+        const viewTop = cameraY, viewBottom = cameraY + CAM_VIEW_HEIGHT;
+        let spawnX, spawnY;
+        const side = Math.floor(Math.random() * 4);
+        const margin = SPAWN_EXTRA_RADIUS;
+        if (side === 0) { // слева
+            spawnX = viewLeft - margin - Math.random() * margin * 0.8;
+            spawnY = viewTop + Math.random() * CAM_VIEW_HEIGHT;
+        } else if (side === 1) { // справа
+            spawnX = viewRight + margin + Math.random() * margin * 0.8;
+            spawnY = viewTop + Math.random() * CAM_VIEW_HEIGHT;
+        } else if (side === 2) { // сверху
+            spawnX = viewLeft + Math.random() * CAM_VIEW_WIDTH;
+            spawnY = viewTop - margin - Math.random() * margin * 0.8;
+        } else { // снизу
+            spawnX = viewLeft + Math.random() * CAM_VIEW_WIDTH;
+            spawnY = viewBottom + margin + Math.random() * margin * 0.8;
+        }
+        spawnX = clamp(spawnX, ENEMY_RADIUS, WORLD_WIDTH - ENEMY_RADIUS);
+        spawnY = clamp(spawnY, ENEMY_RADIUS, WORLD_HEIGHT - ENEMY_RADIUS);
+        enemies.push({
+            x: spawnX,
+            y: spawnY,
+            radius: ENEMY_RADIUS,
+            hp: ENEMY_HP,
+            lastGroanTime: 0
+        });
+    }
+
+    // ===========================
+    // ЛОГИКА ОБНОВЛЕНИЯ
+    // ===========================
+    // ------ Управление с клавиатуры ------
+    const keyState = {
+        KeyW: false, KeyA: false, KeyS: false, KeyD: false,
+        ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false
+    };
+
+    function updatePlayer(deltaTime) {
+        let moveX = 0, moveY = 0;
+        if (keyState.ArrowUp || keyState.KeyW) moveY -= 1;
+        if (keyState.ArrowDown || keyState.KeyS) moveY += 1;
+        if (keyState.ArrowLeft || keyState.KeyA) moveX -= 1;
+        if (keyState.ArrowRight || keyState.KeyD) moveX += 1;
+        if (moveX !== 0 || moveY !== 0) {
+            const len = Math.hypot(moveX, moveY);
+            moveX /= len;
+            moveY /= len;
+        }
+
+        const hasInput = (moveX !== 0 || moveY !== 0);
+        if (hasInput) {
+            player.velX += moveX * PLAYER_ACCEL * deltaTime;
+            player.velY += moveY * PLAYER_ACCEL * deltaTime;
+            const limited = limitVelocity(player.velX, player.velY, PLAYER_MAX_SPEED);
+            player.velX = limited.vx;
+            player.velY = limited.vy;
+        } else {
+            const speed = Math.hypot(player.velX, player.velY);
+            if (speed > 0) {
+                const decel = PLAYER_ACCEL * deltaTime;
+                const newSpeed = Math.max(0, speed - decel);
+                if (newSpeed === 0) {
+                    player.velX = player.velY = 0;
+                } else {
+                    player.velX = (player.velX / speed) * newSpeed;
+                    player.velY = (player.velY / speed) * newSpeed;
+                }
+            }
+        }
+
+        let newX = player.x + player.velX * deltaTime;
+        let newY = player.y + player.velY * deltaTime;
+        newX = clamp(newX, PLAYER_RADIUS, WORLD_WIDTH - PLAYER_RADIUS);
+        newY = clamp(newY, PLAYER_RADIUS, WORLD_HEIGHT - PLAYER_RADIUS);
+        if (newX === PLAYER_RADIUS || newX === WORLD_WIDTH - PLAYER_RADIUS) player.velX = 0;
+        if (newY === PLAYER_RADIUS || newY === WORLD_HEIGHT - PLAYER_RADIUS) player.velY = 0;
+        player.x = newX;
+        player.y = newY;
+    }
+
+    function updatePellets(deltaTime, nowSec) {
+        for (let i = pellets.length - 1; i >= 0; i--) {
+            const p = pellets[i];
+            p.x += p.vx * deltaTime;
+            p.y += p.vy * deltaTime;
+
+            if (nowSec - p.createdTime >= p.lifeSpan) {
+                pellets.splice(i, 1);
+                continue;
+            }
+            if (p.x < -500 || p.x > WORLD_WIDTH + 500 || p.y < -500 || p.y > WORLD_HEIGHT + 500) {
+                pellets.splice(i, 1);
+                continue;
+            }
+
+            let hitIndex = -1;
+            for (let j = 0; j < enemies.length; j++) {
+                const e = enemies[j];
+                if (Math.hypot(p.x - e.x, p.y - e.y) < p.radius + e.radius) {
+                    hitIndex = j;
+                    break;
+                }
+            }
+            if (hitIndex !== -1) {
+                playRandomBodyfallSound();
+                enemies.splice(hitIndex, 1);
+                score++;
+                saveHighScoreIfNeeded(score);
+                updateUI();
+                pellets.splice(i, 1);
+            }
+        }
+    }
+
+    function updateEnemies(deltaTime, nowSec) {
+        // Движение врагов
+        for (const e of enemies) {
+            const dx = player.x - e.x;
+            const dy = player.y - e.y;
+            const distance = Math.hypot(dx, dy);
+            let currentSpeed = ENEMY_BASE_SPEED;
+            if (distance < ACCELERATION_RADIUS) currentSpeed *= ENEMY_ACCEL_FACTOR;
+            if (distance > 0.01) {
+                const move = currentSpeed * deltaTime;
+                const stepX = (dx / distance) * move;
+                const stepY = (dy / distance) * move;
+                e.x += stepX;
+                e.y += stepY;
+            }
+            e.x = clamp(e.x, ENEMY_RADIUS, WORLD_WIDTH - ENEMY_RADIUS);
+            e.y = clamp(e.y, ENEMY_RADIUS, WORLD_HEIGHT - ENEMY_RADIUS);
+
+            // Звуки (стоны) в зависимости от расстояния
+            if (distance < CAM_VIEW_HEIGHT && gameActive && audioEnabled) {
+                if (e.lastGroanTime === 0) e.lastGroanTime = nowSec + Math.random() * 2;
+                if (nowSec - e.lastGroanTime >= 2 + Math.random() * 2) {
+                    playRandomZombieSound(distance);
+                    e.lastGroanTime = nowSec;
+                }
+            }
+        }
+
+        // Обработка столкновений с игроком и урон
+        for (let i = 0; i < enemies.length; i++) {
+            const e = enemies[i];
+            const dx = player.x - e.x;
+            const dy = player.y - e.y;
+            const dist = Math.hypot(dx, dy);
+            const minDist = PLAYER_RADIUS + ENEMY_RADIUS;
+            if (dist < minDist) {
+                if (invincibleTimer <= 0 && gameActive) {
+                    health--;
+                    playBiteSound();
+                    if (dist > 0.001) {
+                        const angle = Math.atan2(dy, dx);
+                        const knockX = Math.cos(angle) * KNOCKBACK_FORCE;
+                        const knockY = Math.sin(angle) * KNOCKBACK_FORCE;
+                        player.velX += knockX;
+                        player.velY += knockY;
+                        const limited = limitVelocity(player.velX, player.velY, PLAYER_MAX_SPEED * 1.5);
+                        player.velX = limited.vx;
+                        player.velY = limited.vy;
+                    }
+                    if (health <= 0) {
+                        health = 0;
+                        gameActive = false;
+                        showGameOverUI();
+                    }
+                    invincibleTimer = INVINCIBLE_DURATION;
+                }
+                // Отталкивание врага, чтобы не застревал внутри игрока
+                if (dist < 0.001) continue;
+                const overlap = minDist - dist;
+                const angle = Math.atan2(dy, dx);
+                const pushFactor = 0.01;
+                const pushX = Math.cos(angle) * overlap * pushFactor;
+                const pushY = Math.sin(angle) * overlap * pushFactor;
+                e.x -= pushX;
+                e.y -= pushY;
+                e.x = clamp(e.x, ENEMY_RADIUS, WORLD_WIDTH - ENEMY_RADIUS);
+                e.y = clamp(e.y, ENEMY_RADIUS, WORLD_HEIGHT - ENEMY_RADIUS);
+            }
+        }
+    }
+
+    function updateInvincibility(deltaTime) {
+        if (invincibleTimer > 0) {
+            invincibleTimer -= deltaTime;
+            if (invincibleTimer < 0) invincibleTimer = 0;
+        }
+    }
+
+    function trySpawnEnemy(nowSec) {
+        if (!gameActive) return;
+        if (nowSec - lastSpawnTime >= getCurrentSpawnInterval()) {
+            spawnEnemy();
+            lastSpawnTime = nowSec;
+        }
+    }
+
+    // ------ Выстрел из дробовика ------
+    function fireShotgunAt(targetX, targetY, nowSec) {
+        const dx = targetX - player.x;
+        const dy = targetY - player.y;
+        const length = Math.hypot(dx, dy);
+        if (length < 0.001) return;
+
+        const baseAngle = Math.atan2(dy, dx);
+        const pelletCount = Math.floor(Math.random() * (PELLET_COUNT_MAX - PELLET_COUNT_MIN + 1) + PELLET_COUNT_MIN);
+        for (let i = 0; i < pelletCount; i++) {
+            const spread = (Math.random() - 0.5) * 2 * SPREAD_ANGLE_RAD;
+            const angle = baseAngle + spread;
+            const vx = Math.cos(angle) * PELLET_SPEED;
+            const vy = Math.sin(angle) * PELLET_SPEED;
+            pellets.push({
+                x: player.x, y: player.y,
+                vx, vy,
+                radius: PELLET_RADIUS,
+                lifeSpan: PELLET_LIFESPAN,
+                createdTime: nowSec
+            });
+        }
+        // Отдача
+        const recoilDirX = -dx / length;
+        const recoilDirY = -dy / length;
+        player.velX += recoilDirX * RECOIL_FORCE;
+        player.velY += recoilDirY * RECOIL_FORCE;
+        const limited = limitVelocity(player.velX, player.velY, PLAYER_MAX_SPEED);
+        player.velX = limited.vx;
+        player.velY = limited.vy;
+        playShotgunSound();
+    }
+
+    // ===========================
+    // ОТРИСОВКА (RENDER)
+    // ===========================
+    function drawBackground() {
+        ctx.fillStyle = BACKGROUND_COLOR;
+        ctx.fillRect(0, 0, CAM_VIEW_WIDTH, CAM_VIEW_HEIGHT);
+        const startX = Math.floor(cameraX / GRID_STEP) * GRID_STEP;
+        const startY = Math.floor(cameraY / GRID_STEP) * GRID_STEP;
+        ctx.strokeStyle = GRID_COLOR;
+        ctx.lineWidth = 0.8;
+        for (let x = startX; x < cameraX + CAM_VIEW_WIDTH + GRID_STEP; x += GRID_STEP) {
+            const sx = x - cameraX;
+            if (sx >= 0 && sx <= CAM_VIEW_WIDTH) {
+                ctx.beginPath();
+                ctx.moveTo(sx, 0);
+                ctx.lineTo(sx, CAM_VIEW_HEIGHT);
+                ctx.stroke();
+            }
+        }
+        for (let y = startY; y < cameraY + CAM_VIEW_HEIGHT + GRID_STEP; y += GRID_STEP) {
+            const sy = y - cameraY;
+            if (sy >= 0 && sy <= CAM_VIEW_HEIGHT) {
+                ctx.beginPath();
+                ctx.moveTo(0, sy);
+                ctx.lineTo(CAM_VIEW_WIDTH, sy);
+                ctx.stroke();
+            }
+        }
+    }
+
+    function drawHealthBar() {
+        if (health <= 0) return;
+        const pos = worldToScreen(player.x, player.y);
+        const barX = pos.x - HEALTH_BAR_WIDTH / 2;
+        const barY = pos.y + HEALTH_BAR_OFFSET_Y;
+        ctx.fillStyle = '#4a1a1a';
+        ctx.fillRect(barX, barY, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT);
+        const fillWidth = HEALTH_BAR_WIDTH * (health / START_HEALTH);
+        ctx.fillStyle = '#e34d4d';
+        ctx.fillRect(barX, barY, fillWidth, HEALTH_BAR_HEIGHT);
+        ctx.strokeStyle = '#2c2c2c';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(barX, barY, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT);
+    }
+
+    function drawPlayer() {
+        const pos = worldToScreen(player.x, player.y);
+        const invincibleFlash = (invincibleTimer > 0 && gameActive);
+        if (invincibleFlash) {
+            ctx.globalAlpha = (Math.floor(Date.now() / 50) % 3 < 1) ? 0.55 : 1;
+        }
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = "#00ccff80";
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, PLAYER_RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = PLAYER_COLOR;
+        ctx.fill();
+        ctx.strokeStyle = "#ffffffcc";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, PLAYER_RADIUS - 3, 0, Math.PI * 2);
+        ctx.fillStyle = "#88ffff80";
+        ctx.fill();
+        if (gameActive) {
+            const now = performance.now() / 1000;
+            const timeSinceLast = now - lastShotTime;
+            if (timeSinceLast < SHOT_COOLDOWN) {
+                const progress = 1 - ((SHOT_COOLDOWN - timeSinceLast) / SHOT_COOLDOWN);
+                const radius = PLAYER_RADIUS + 6;
+                const start = -Math.PI / 2;
+                const end = start + Math.PI * 2 * progress;
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, radius, start, end);
+                ctx.lineWidth = 2.5;
+                ctx.strokeStyle = "#FFE484";
+                ctx.stroke();
+            }
+        }
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+    }
+
+    function drawEnemies() {
+        for (const e of enemies) {
+            const pos = worldToScreen(e.x, e.y);
+            if (pos.x + ENEMY_RADIUS < 0 || pos.x - ENEMY_RADIUS > CAM_VIEW_WIDTH ||
+                pos.y + ENEMY_RADIUS < 0 || pos.y - ENEMY_RADIUS > CAM_VIEW_HEIGHT) continue;
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = "#2e7d32";
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, ENEMY_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = ENEMY_COLOR;
+            ctx.fill();
+            ctx.strokeStyle = "#1b5e20";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        }
+        ctx.shadowBlur = 0;
+    }
+
+    function drawPellets() {
+        for (const p of pellets) {
+            const pos = worldToScreen(p.x, p.y);
+            if (pos.x + PELLET_RADIUS < 0 || pos.x - PELLET_RADIUS > CAM_VIEW_WIDTH ||
+                pos.y + PELLET_RADIUS < 0 || pos.y - PELLET_RADIUS > CAM_VIEW_HEIGHT) continue;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, PELLET_RADIUS - 1, 0, Math.PI * 2);
+            ctx.fillStyle = PELLET_COLOR;
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, PELLET_RADIUS - 2, 0, Math.PI * 2);
+            ctx.fillStyle = "#FFAA33";
+            ctx.fill();
+        }
+    }
+
+    function drawCrosshair() {
+        if (!mouseInsideCanvas) return;
+        const screenMouse = worldToScreen(mouseWorldX, mouseWorldY);
+        if (screenMouse.x < 0 || screenMouse.x > CAM_VIEW_WIDTH ||
+            screenMouse.y < 0 || screenMouse.y > CAM_VIEW_HEIGHT) return;
+        ctx.save();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        const size = 12;
+        ctx.beginPath();
+        ctx.moveTo(screenMouse.x - size, screenMouse.y);
+        ctx.lineTo(screenMouse.x - 4, screenMouse.y);
+        ctx.moveTo(screenMouse.x + 4, screenMouse.y);
+        ctx.lineTo(screenMouse.x + size, screenMouse.y);
+        ctx.moveTo(screenMouse.x, screenMouse.y - size);
+        ctx.lineTo(screenMouse.x, screenMouse.y - 4);
+        ctx.moveTo(screenMouse.x, screenMouse.y + 4);
+        ctx.lineTo(screenMouse.x, screenMouse.y + size);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(screenMouse.x, screenMouse.y, 6, 0, Math.PI * 2);
+        ctx.strokeStyle = "#aaffdd";
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(screenMouse.x, screenMouse.y, 2, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffcc77";
+        ctx.fill();
+        ctx.restore();
+    }
+
+    // ===========================
+    // ВВОД И ОБРАБОТЧИКИ
+    // ===========================
+    function handleKeyDown(e) {
+        const code = e.code;
+        if (keyState.hasOwnProperty(code)) {
+            keyState[code] = true;
+            e.preventDefault();
+        }
+        if (code === 'ArrowUp' || code === 'ArrowDown' || code === 'ArrowLeft' || code === 'ArrowRight') {
+            e.preventDefault();
+        }
+    }
+    function handleKeyUp(e) {
+        const code = e.code;
+        if (keyState.hasOwnProperty(code)) {
+            keyState[code] = false;
+            e.preventDefault();
+        }
+    }
+
+    function onMouseMove(e) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        let mx = (e.clientX - rect.left) * scaleX;
+        let my = (e.clientY - rect.top) * scaleY;
+        mx = clamp(mx, 0, CAM_VIEW_WIDTH);
+        my = clamp(my, 0, CAM_VIEW_HEIGHT);
+        rawMouseScreenX = mx;
+        rawMouseScreenY = my;
+        const worldPos = screenToWorld(mx, my);
+        mouseWorldX = worldPos.x;
+        mouseWorldY = worldPos.y;
+        mouseInsideCanvas = true;
+    }
+    function onMouseLeave() { mouseInsideCanvas = false; }
+
+    function handleCanvasClick(e) {
+        if (!gameActive) return;
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        let mx = (e.clientX - rect.left) * scaleX;
+        let my = (e.clientY - rect.top) * scaleY;
+        mx = clamp(mx, 0, CAM_VIEW_WIDTH);
+        my = clamp(my, 0, CAM_VIEW_HEIGHT);
+        const worldTarget = screenToWorld(mx, my);
+        const nowSec = performance.now() / 1000;
+        if (nowSec - lastShotTime >= SHOT_COOLDOWN) {
+            fireShotgunAt(worldTarget.x, worldTarget.y, nowSec);
+            lastShotTime = nowSec;
+        }
+    }
+
+    function firstInteraction() {
+        enableAudio();
+    }
+
+    setInterval(() => {
+        if (mouseInsideCanvas && gameActive) {
+            const worldPos = screenToWorld(rawMouseScreenX, rawMouseScreenY);
+            mouseWorldX = worldPos.x;
+            mouseWorldY = worldPos.y;
+        }
+    }, 1000 / 60);
+
+    // ===========================
+    // 10. РЕСТАРТ ИГРЫ
+    // ===========================
+    function restartGame() {
+        gameActive = true;
+        health = START_HEALTH;
+        score = 0;
+        enemies = [];
+        pellets = [];
+        invincibleTimer = 0;
+        gameTimeElapsed = 0;
+        player.x = WORLD_WIDTH / 2;
+        player.y = WORLD_HEIGHT / 2;
+        player.velX = 0;
+        player.velY = 0;
+        const nowSec = performance.now() / 1000;
+        lastSpawnTime = nowSec;
+        lastShotTime = nowSec;
+        for (let i = 0; i < 3; i++) spawnEnemy();
+        updateCamera();
+        mouseWorldX = player.x;
+        mouseWorldY = player.y;
+        updateUI();
+        hideGameOverUI();
+        if (audioEnabled) {
+            restartBackgroundMusic();
+        }
+    }
+
+    // ===========================
+    // 11. ГЛАВНЫЙ ЦИКЛ
+    // ===========================
+    let lastTimestamp = 0;
+    function gameLoop(nowMs) {
+        const nowSec = nowMs / 1000;
+        if (lastTimestamp === 0) {
+            lastTimestamp = nowSec;
+            lastSpawnTime = nowSec;
+            lastShotTime = nowSec;
+            requestAnimationFrame(gameLoop);
+            return;
+        }
+        let dt = Math.min(0.033, nowSec - lastTimestamp);
+        if (dt <= 0) {
+            lastTimestamp = nowSec;
+            requestAnimationFrame(gameLoop);
+            return;
+        }
+        if (gameActive) {
+            gameTimeElapsed += dt;
+            updatePlayer(dt);
+            updateCamera();
+            updateEnemies(dt, nowSec);
+            updatePellets(dt, nowSec);
+            updateInvincibility(dt);
+            trySpawnEnemy(nowSec);
+        } else {
+            updateCamera();
+        }
+        drawBackground();
+        drawPellets();
+        drawEnemies();
+        drawPlayer();
+        drawHealthBar();
+        drawCrosshair();
+        lastTimestamp = nowSec;
+        requestAnimationFrame(gameLoop);
+    }
+
+    // ===========================
+    // 12. ИНИЦИАЛИЗАЦИЯ
+    // ===========================
+    function init() {
+        loadVolumeSetting();      // загружаем громкость из localStorage
+        loadHighScore();
+        updateUI();
+        restartGame();
+        // следим за изменением громкости для фоновой музыки при ручной настройке
+        const origSetMaster = setMasterVolume;
+        window.setMasterVolume = (v) => {
+            origSetMaster(v);
+            updateBackgroundMusicVolume();
+        };
+        setMasterVolume(masterVolume);  // применяем текущую к музыке
+
+        canvas.addEventListener('click', (e) => { firstInteraction(); handleCanvasClick(e); });
+        canvas.addEventListener('mousemove', onMouseMove);
+        canvas.addEventListener('mouseleave', onMouseLeave);
+        canvas.addEventListener('keydown', handleKeyDown);
+        canvas.addEventListener('keyup', handleKeyUp);
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        restartBtn.addEventListener('click', () => restartGame());
+        canvas.focus();
+        requestAnimationFrame(gameLoop);
+    }
+    init();
+})();
