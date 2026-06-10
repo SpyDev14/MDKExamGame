@@ -223,16 +223,16 @@
             finalScoreSpan.textContent = score;
             finalBestSpan.textContent = highScore;
             gameoverPanel.style.visibility = "visible";
-            stopBackgroundMusic();  // Останавливаем музыку при проигрыше
+            stopBackgroundMusic();
         }
 
         function hideGameOverUI() {
             gameoverPanel.style.visibility = "hidden";
         }
 
-        // ---------- AUDIO (HTMLAudioElement) ----------
+        // ---------- AUDIO ----------
         let audioEnabled = false;
-        let bgMusic = null; // фоновая музыка
+        let bgMusic = null;
 
         const SHOTGUN_PATH = "resources/audio/shotgun-shot.ogg";
         const BITE_PATH = "resources/audio/bite.ogg";
@@ -259,18 +259,12 @@
         }
 
         function playBiteSound() {
-            if (!audioEnabled) {
-                console.log("Bite sound blocked: audio not enabled");
-                return;
-            }
+            if (!audioEnabled) return;
             try {
                 const audio = new Audio(BITE_PATH);
                 audio.volume = 1.0;
                 audio.play().catch(e => console.log("Bite play failed", e));
-                console.log("Bite sound played"); // отладка
-            } catch(e) {
-                console.log("Bite exception", e);
-            }
+            } catch(e) {}
         }
 
         function playRandomBodyfallSound() {
@@ -304,7 +298,6 @@
         function startBackgroundMusic() {
             if (!audioEnabled) return;
             if (bgMusic) {
-                // Если уже есть, просто запускаем с начала
                 bgMusic.currentTime = 0;
                 bgMusic.play().catch(e => console.log("Background resume failed", e));
                 return;
@@ -321,7 +314,6 @@
             if (bgMusic) {
                 bgMusic.pause();
                 bgMusic.currentTime = 0;
-                // не удаляем объект, чтобы можно было перезапустить
             }
         }
 
@@ -360,7 +352,7 @@
         const PLAYER_MAX_SPEED = 340;
         const PLAYER_ACCEL_TIME = 0.25;
         const PLAYER_ACCEL = PLAYER_MAX_SPEED / PLAYER_ACCEL_TIME;
-        const RECOIL_FORCE = 280;
+        const RECOIL_FORCE = 280 * 1.5;
         const KNOCKBACK_FORCE = 380;
         const HEALTH_BAR_WIDTH = 40;
         const HEALTH_BAR_HEIGHT = 7;
@@ -377,13 +369,17 @@
         const SPREAD_ANGLE_RAD = SPREAD_ANGLE_DEG * Math.PI / 180;
         const ENEMY_RADIUS = 13;
         const ENEMY_COLOR = '#4CAF50';
-        const ENEMY_BASE_SPEED = 135;
+        const ENEMY_BASE_SPEED = 112;
         const ACCELERATION_RADIUS = 9 * PLAYER_RADIUS;
-        const ENEMY_ACCEL_FACTOR = 2.0;
+        const ENEMY_ACCEL_FACTOR = 1.75;
         const ENEMY_HP = 1;
+
+        // ---------- НАРАСТАНИЕ СЛОЖНОСТИ ----------
         const SPAWN_INTERVAL_START = 1.25;
-        const SPAWN_INTERVAL_MIN = 0.32;
-        const SPAWN_INTERVAL_DECAY_RATE = 0.021;
+        const SPAWN_INTERVAL_MIN = 0.25;
+        const SPAWN_INTERVAL_DECAY_RATE = 0.02;
+        // ------------------------------------------------
+
         const START_HEALTH = 5;
         const INVINCIBLE_DURATION = 0.75;
         const SPAWN_EXTRA_RADIUS = 250;
@@ -421,6 +417,7 @@
         // ---------- HELPER FUNCTIONS ----------
         function getCurrentSpawnInterval() {
             let interval = SPAWN_INTERVAL_START - (gameTimeElapsed * SPAWN_INTERVAL_DECAY_RATE);
+            // Epsilon: интервал не может стать меньше 0.05 секунд (технический предел)
             if (interval < SPAWN_INTERVAL_MIN) interval = SPAWN_INTERVAL_MIN;
             return interval;
         }
@@ -493,6 +490,7 @@
         }
 
         function updateEnemies(deltaTime, nowSec) {
+            // Движение
             for (let i=0; i<enemies.length; i++) {
                 const e = enemies[i];
                 const dx = player.x - e.x, dy = player.y - e.y;
@@ -515,6 +513,7 @@
                     }
                 }
             }
+            // Коллизии и урон
             for (let i=0; i<enemies.length; i++) {
                 const e = enemies[i];
                 const dx = player.x - e.x, dy = player.y - e.y;
@@ -523,7 +522,7 @@
                 if (dist < minDist) {
                     if (invincibleTimer <= 0 && gameActive) {
                         health--;
-                        playBiteSound();  // <-- вызываем звук укуса
+                        playBiteSound();
                         if (dist > 0.001) {
                             const angle = Math.atan2(dy, dx);
                             const knockX = Math.cos(angle) * KNOCKBACK_FORCE;
@@ -582,7 +581,10 @@
 
         function trySpawnEnemy(now) {
             if (!gameActive) return;
-            if (now - lastSpawnTime >= getCurrentSpawnInterval()) { spawnEnemy(); lastSpawnTime = now; }
+            if (now - lastSpawnTime >= getCurrentSpawnInterval()) {
+                spawnEnemy();
+                lastSpawnTime = now;
+            }
         }
         function updateInvincibility(deltaTime) { if (invincibleTimer > 0) { invincibleTimer -= deltaTime; if (invincibleTimer < 0) invincibleTimer = 0; } }
 
@@ -734,7 +736,6 @@
             mouseWorldX = player.x; mouseWorldY = player.y;
             updateUI();
             hideGameOverUI();
-            // Перезапускаем музыку с начала
             if (audioEnabled) {
                 restartBackgroundMusic();
             }
