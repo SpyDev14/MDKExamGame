@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Vampire Survivors-like | Shotgun Arena | Manual Aim + Crosshair</title>
+    <title>Vampire Survivors-like | Shotgun Arena | Green Zombies + Sounds</title>
     <style>
         * {
             margin: 0;
@@ -34,7 +34,7 @@
             margin: 0 auto;
             border-radius: 12px;
             box-shadow: 0 0 0 2px #2e3a44, 0 0 0 5px #0f1117;
-            cursor: none; /* скрываем стандартный курсор, рисуем свой прицел */
+            cursor: none;
         }
 
         canvas:focus {
@@ -72,45 +72,66 @@
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
-        // ========== AUDIO SYSTEM (shotgun) ==========
+        // ========== AUDIO CONTEXT & SOUNDS ==========
         let audioContext = null;
         let shotgunBuffer = null;
+        let zombieSounds = [];
         let isAudioEnabled = false;
 
-        const RAW_AUDIO_URL = "https://raw.githubusercontent.com/space-wizards/space-station-14/master/Resources/Audio/Weapons/Guns/Gunshots/shotgun.ogg";
+        // New zombie sound URLs (from GitHub raw)
+        const ZOMBIE_SOUND_URLS = [
+            "https://raw.githubusercontent.com/space-wizards/space-station-14/master/Resources/Audio/Voice/Zombie/zombie-1.ogg",
+            "https://raw.githubusercontent.com/space-wizards/space-station-14/master/Resources/Audio/Voice/Zombie/zombie-2.ogg",
+            "https://raw.githubusercontent.com/space-wizards/space-station-14/master/Resources/Audio/Voice/Zombie/zombie-3.ogg"
+        ];
+
+        const SHOTGUN_URL = "https://raw.githubusercontent.com/space-wizards/space-station-14/master/Resources/Audio/Weapons/Guns/Gunshots/shotgun.ogg";
 
         async function initAudio() {
             if (audioContext) return;
             try {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                const response = await fetch(RAW_AUDIO_URL);
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const arrayBuffer = await response.arrayBuffer();
-                shotgunBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                // Load shotgun sound
+                const shotgunResp = await fetch(SHOTGUN_URL);
+                if (shotgunResp.ok) {
+                    const arrayBuffer = await shotgunResp.arrayBuffer();
+                    shotgunBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                } else {
+                    console.warn("Shotgun sound not available, using procedural");
+                }
+                // Load zombie sounds
+                for (let url of ZOMBIE_SOUND_URLS) {
+                    try {
+                        const resp = await fetch(url);
+                        if (resp.ok) {
+                            const buf = await resp.arrayBuffer();
+                            const audioBuf = await audioContext.decodeAudioData(buf);
+                            zombieSounds.push(audioBuf);
+                        } else {
+                            console.warn(`Zombie sound ${url} not found`);
+                        }
+                    } catch(e) {
+                        console.warn(`Failed to load ${url}`, e);
+                    }
+                }
                 isAudioEnabled = true;
-                console.log("Shotgun sound loaded");
+                console.log(`Loaded ${zombieSounds.length} zombie sounds`);
             } catch (err) {
-                console.warn("Could not load remote sound, using procedural shotgun sound", err);
-                createProceduralShotgunSound();
-                isAudioEnabled = true;
+                console.warn("Audio init failed, sounds disabled", err);
+                isAudioEnabled = false;
             }
-        }
-
-        function createProceduralShotgunSound() {
-            if (!audioContext) return;
-            // просто помечаем, что буфера нет, но функция playSoundInternal сделает синтез
         }
 
         function playShotgunSound() {
             if (!audioContext || !isAudioEnabled) return;
             if (audioContext.state === 'suspended') {
-                audioContext.resume().then(() => playSoundInternal()).catch(e=>console.log);
+                audioContext.resume().then(() => playShotgunInternal()).catch(e=>console.log);
             } else {
-                playSoundInternal();
+                playShotgunInternal();
             }
         }
 
-        function playSoundInternal() {
+        function playShotgunInternal() {
             if (!audioContext || !isAudioEnabled) return;
             if (shotgunBuffer) {
                 const source = audioContext.createBufferSource();
@@ -118,19 +139,16 @@
                 source.connect(audioContext.destination);
                 source.start();
             } else {
-                // procedural shotgun sound (noise burst)
+                // fallback procedural
                 const now = audioContext.currentTime;
                 const masterGain = audioContext.createGain();
-                masterGain.gain.setValueAtTime(0.55, now);
+                masterGain.gain.setValueAtTime(0.45, now);
                 masterGain.connect(audioContext.destination);
-
                 const bufferSize = 4096;
                 const noiseNode = audioContext.createScriptProcessor(bufferSize, 1, 1);
                 noiseNode.onaudioprocess = function(e) {
                     const output = e.outputBuffer.getChannelData(0);
-                    for (let i = 0; i < bufferSize; i++) {
-                        output[i] = (Math.random() * 2 - 1) * 0.7;
-                    }
+                    for (let i = 0; i < bufferSize; i++) output[i] = (Math.random() * 2 - 1) * 0.6;
                 };
                 const filter = audioContext.createBiquadFilter();
                 filter.type = "lowpass";
@@ -138,16 +156,15 @@
                 filter.Q.value = 4;
                 noiseNode.connect(filter);
                 filter.connect(masterGain);
-                masterGain.gain.setValueAtTime(0.6, now);
+                masterGain.gain.setValueAtTime(0.5, now);
                 masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
                 noiseNode.start();
                 noiseNode.stop(now + 0.25);
-
                 const osc = audioContext.createOscillator();
                 osc.type = "sine";
                 osc.frequency.value = 80;
                 const thumpGain = audioContext.createGain();
-                thumpGain.gain.setValueAtTime(0.4, now);
+                thumpGain.gain.setValueAtTime(0.3, now);
                 thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
                 osc.connect(thumpGain);
                 thumpGain.connect(masterGain);
@@ -159,31 +176,45 @@
             }
         }
 
+        function playRandomZombieSound() {
+            if (!audioContext || !isAudioEnabled) return;
+            if (zombieSounds.length === 0) return;
+            if (audioContext.state === 'suspended') {
+                audioContext.resume().then(() => {
+                    const source = audioContext.createBufferSource();
+                    const randomIdx = Math.floor(Math.random() * zombieSounds.length);
+                    source.buffer = zombieSounds[randomIdx];
+                    source.connect(audioContext.destination);
+                    source.start();
+                }).catch(e=>console.log);
+            } else {
+                const source = audioContext.createBufferSource();
+                const randomIdx = Math.floor(Math.random() * zombieSounds.length);
+                source.buffer = zombieSounds[randomIdx];
+                source.connect(audioContext.destination);
+                source.start();
+            }
+        }
+
         // ---------- WORLD & CAMERA ----------
         const WORLD_WIDTH = 4000;
         const WORLD_HEIGHT = 4000;
         const CAM_VIEW_WIDTH = canvas.width;
         const CAM_VIEW_HEIGHT = canvas.height;
-
         let cameraX = 0, cameraY = 0;
 
         // ---------- GAME CONSTANTS ----------
         const BACKGROUND_COLOR = '#151e27';
         const GRID_COLOR = '#253644';
         const GRID_STEP = 60;
-
         const PLAYER_RADIUS = 16;
         const PLAYER_COLOR = '#2ad4ff';
         const PLAYER_SPEED = 340;
-
         const HEALTH_BAR_WIDTH = 40;
         const HEALTH_BAR_HEIGHT = 7;
-        const HEALTH_BAR_OFFSET_Y = -22;
-
-        // shotgun cooldown between manual shots
-        const SHOT_COOLDOWN = 0.55;       // seconds
+        const HEALTH_BAR_OFFSET_Y = -28;   // raised by 6px (was -22)
+        const SHOT_COOLDOWN = 0.55;
         let lastShotTime = 0;
-
         const PELLET_COUNT_MIN = 5;
         const PELLET_COUNT_MAX = 8;
         const PELLET_RADIUS = 4;
@@ -192,16 +223,17 @@
         const PELLET_COLOR = '#FFD966';
         const SPREAD_ANGLE_DEG = 25;
         const SPREAD_ANGLE_RAD = SPREAD_ANGLE_DEG * Math.PI / 180;
-
         const ENEMY_RADIUS = 13;
-        const ENEMY_COLOR = '#D64545';
-        const ENEMY_SPEED = 128;
+        const ENEMY_COLOR = '#4CAF50';     // green zombies
+        // Base speed reduced by 30% (was 128, now 90)
+        const ENEMY_BASE_SPEED = 90;
+        // Acceleration radius = 7 * player radius (112 pixels)
+        const ACCELERATION_RADIUS = 7 * PLAYER_RADIUS; // 112
+        const ENEMY_ACCEL_FACTOR = 2.0;    // double speed inside radius
         const ENEMY_HP = 1;
-
         const SPAWN_INTERVAL_START = 1.25;
         const SPAWN_INTERVAL_MIN = 0.32;
         const SPAWN_INTERVAL_DECAY_RATE = 0.021;
-
         const START_HEALTH = 5;
         const INVINCIBLE_DURATION = 0.5;
         const SPAWN_EXTRA_RADIUS = 250;
@@ -210,29 +242,33 @@
         let gameActive = true;
         let health = START_HEALTH;
         let score = 0;
-
-        let player = {
-            x: WORLD_WIDTH / 2,
-            y: WORLD_HEIGHT / 2,
-            radius: PLAYER_RADIUS
-        };
-
+        let player = { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2, radius: PLAYER_RADIUS };
         let enemies = [];
         let pellets = [];
-
         let lastSpawnTime = 0;
         let invincibleTimer = 0;
         let gameTimeElapsed = 0;
 
-        // Mouse position (for crosshair) in world coordinates
+        // Mouse position (world)
         let mouseWorldX = player.x, mouseWorldY = player.y;
         let mouseInsideCanvas = false;
+        let rawMouseScreenX = 0, rawMouseScreenY = 0;
 
-        // Input keys
-        const keys = {
-            ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false,
-            w: false, s: false, a: false, d: false
+        // ---------- INPUT: WASD + ARROWS (fix for Russian layout using .code) ----------
+        const keyState = {
+            KeyW: false, KeyA: false, KeyS: false, KeyD: false,
+            ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false
         };
+
+        // Helper to get movement vector
+        function getMovementVector() {
+            let moveX = 0, moveY = 0;
+            if (keyState.ArrowUp || keyState.KeyW) moveY -= 1;
+            if (keyState.ArrowDown || keyState.KeyS) moveY += 1;
+            if (keyState.ArrowLeft || keyState.KeyA) moveX -= 1;
+            if (keyState.ArrowRight || keyState.KeyD) moveX += 1;
+            return { moveX, moveY };
+        }
 
         // ---------- HELPER FUNCTIONS ----------
         function getCurrentSpawnInterval() {
@@ -258,17 +294,14 @@
             return { x: screenX + cameraX, y: screenY + cameraY };
         }
 
-        // Spawn enemy outside camera view
         function spawnEnemy() {
             const viewLeft = cameraX;
             const viewRight = cameraX + CAM_VIEW_WIDTH;
             const viewTop = cameraY;
             const viewBottom = cameraY + CAM_VIEW_HEIGHT;
-
             let spawnX, spawnY;
             const side = Math.floor(Math.random() * 4);
             const margin = SPAWN_EXTRA_RADIUS;
-
             if (side === 0) {
                 spawnX = viewLeft - margin - Math.random() * (margin * 0.8);
                 spawnY = viewTop + Math.random() * CAM_VIEW_HEIGHT;
@@ -282,19 +315,19 @@
                 spawnX = viewLeft + Math.random() * CAM_VIEW_WIDTH;
                 spawnY = viewBottom + margin + Math.random() * (margin * 0.8);
             }
-
             spawnX = Math.min(Math.max(spawnX, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
             spawnY = Math.min(Math.max(spawnY, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
-            enemies.push({ x: spawnX, y: spawnY, radius: ENEMY_RADIUS, hp: ENEMY_HP });
+            enemies.push({
+                x: spawnX, y: spawnY, radius: ENEMY_RADIUS, hp: ENEMY_HP,
+                lastGroanTime: 0
+            });
         }
 
-        // Fire shotgun towards target world coordinates (targetX, targetY)
         function fireShotgunAt(targetX, targetY, now) {
-            // direction from player to target
             const dx = targetX - player.x;
             const dy = targetY - player.y;
             const length = Math.hypot(dx, dy);
-            if (length < 0.001) return; // degenerate
+            if (length < 0.001) return;
             const baseAngle = Math.atan2(dy, dx);
             const pelletCount = Math.floor(Math.random() * (PELLET_COUNT_MAX - PELLET_COUNT_MIN + 1) + PELLET_COUNT_MIN);
             for (let i = 0; i < pelletCount; i++) {
@@ -309,11 +342,10 @@
                     createdTime: now
                 });
             }
-            // play sound
             playShotgunSound();
         }
 
-        // ---------- GAME LOGIC UPDATES ----------
+        // ---------- GAME UPDATES ----------
         function updatePellets(deltaTime, now) {
             for (let i = pellets.length-1; i >= 0; i--) {
                 const p = pellets[i];
@@ -345,23 +377,45 @@
             }
         }
 
-        function updateEnemies(deltaTime) {
+        function updateEnemies(deltaTime, nowSec) {
+            // First update positions with acceleration logic
             for (let i = 0; i < enemies.length; i++) {
                 const e = enemies[i];
                 const dx = player.x - e.x;
                 const dy = player.y - e.y;
-                const length = Math.hypot(dx, dy);
-                if (length > 0.01) {
-                    const move = ENEMY_SPEED * deltaTime;
-                    const stepX = (dx / length) * move;
-                    const stepY = (dy / length) * move;
+                const distance = Math.hypot(dx, dy);
+                let currentSpeed = ENEMY_BASE_SPEED;
+                if (distance < ACCELERATION_RADIUS) {
+                    currentSpeed *= ENEMY_ACCEL_FACTOR;
+                }
+                if (distance > 0.01) {
+                    const move = currentSpeed * deltaTime;
+                    const stepX = (dx / distance) * move;
+                    const stepY = (dy / distance) * move;
                     e.x += stepX;
                     e.y += stepY;
                 }
+                // Keep inside world
                 e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
                 e.y = Math.min(Math.max(e.y, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
+
+                // Zombie sound: only if within visible range (distance < screen height)
+                const isNearPlayer = distance < CAM_VIEW_HEIGHT;
+                if (isNearPlayer && gameActive && isAudioEnabled && zombieSounds.length > 0) {
+                    const now = nowSec;
+                    if (e.lastGroanTime === 0) {
+                        e.lastGroanTime = now + Math.random() * 2;
+                    }
+                    const intervalMin = 2.0;
+                    const intervalMax = 4.0;
+                    if (now - e.lastGroanTime >= intervalMin + Math.random() * (intervalMax - intervalMin)) {
+                        playRandomZombieSound();
+                        e.lastGroanTime = now;
+                    }
+                }
             }
 
+            // Collision and damage (reduced sliding factor 0.01 = 1/100)
             for (let i = 0; i < enemies.length; i++) {
                 const e = enemies[i];
                 const dx = player.x - e.x;
@@ -380,8 +434,9 @@
                     if (dist < 0.001) continue;
                     const overlap = minDist - dist;
                     const angle = Math.atan2(dy, dx);
-                    const pushX = Math.cos(angle) * overlap;
-                    const pushY = Math.sin(angle) * overlap;
+                    const pushFactor = 0.01; // reduced sliding 100x
+                    const pushX = Math.cos(angle) * overlap * pushFactor;
+                    const pushY = Math.sin(angle) * overlap * pushFactor;
                     e.x -= pushX;
                     e.y -= pushY;
                     e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
@@ -391,16 +446,7 @@
         }
 
         function updatePlayer(deltaTime) {
-            let moveX = 0, moveY = 0;
-            if (keys.ArrowUp || keys.w) moveY -= 1;
-            if (keys.ArrowDown || keys.s) moveY += 1;
-            if (keys.ArrowLeft || keys.a) moveX -= 1;
-            if (keys.ArrowRight || keys.d) moveX += 1;
-            if (moveX !== 0 || moveY !== 0) {
-                const len = Math.hypot(moveX, moveY);
-                moveX /= len;
-                moveY /= len;
-            }
+            const { moveX, moveY } = getMovementVector();
             let newX = player.x + moveX * PLAYER_SPEED * deltaTime;
             let newY = player.y + moveY * PLAYER_SPEED * deltaTime;
             newX = Math.min(Math.max(newX, PLAYER_RADIUS), WORLD_WIDTH - PLAYER_RADIUS);
@@ -425,27 +471,21 @@
             }
         }
 
-        // ---------- MOUSE / SHOOTING (manual) ----------
-        function handleCanvasClick(e) {
-            if (!gameActive) return;
-            // get click coordinates relative to canvas
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            let mouseCanvasX = (e.clientX - rect.left) * scaleX;
-            let mouseCanvasY = (e.clientY - rect.top) * scaleY;
-            mouseCanvasX = Math.min(Math.max(mouseCanvasX, 0), CAM_VIEW_WIDTH);
-            mouseCanvasY = Math.min(Math.max(mouseCanvasY, 0), CAM_VIEW_HEIGHT);
-            const worldTarget = screenToWorld(mouseCanvasX, mouseCanvasY);
-
-            const now = performance.now() / 1000;
-            if (now - lastShotTime >= SHOT_COOLDOWN) {
-                fireShotgunAt(worldTarget.x, worldTarget.y, now);
-                lastShotTime = now;
-            }
+        // ---------- MOUSE & CROSSHAIR UPDATES (60Hz) ----------
+        function refreshMousePosition() {
+            if (!mouseInsideCanvas) return;
+            const world = screenToWorld(rawMouseScreenX, rawMouseScreenY);
+            mouseWorldX = world.x;
+            mouseWorldY = world.y;
         }
 
-        // track mouse movement for crosshair
+        // 60 Hz timer for cursor update
+        setInterval(() => {
+            if (mouseInsideCanvas && gameActive) {
+                refreshMousePosition();
+            }
+        }, 1000 / 60);
+
         function onMouseMove(e) {
             const rect = canvas.getBoundingClientRect();
             const scaleX = canvas.width / rect.width;
@@ -454,6 +494,8 @@
             let mouseCanvasY = (e.clientY - rect.top) * scaleY;
             mouseCanvasX = Math.min(Math.max(mouseCanvasX, 0), CAM_VIEW_WIDTH);
             mouseCanvasY = Math.min(Math.max(mouseCanvasY, 0), CAM_VIEW_HEIGHT);
+            rawMouseScreenX = mouseCanvasX;
+            rawMouseScreenY = mouseCanvasY;
             const worldPos = screenToWorld(mouseCanvasX, mouseCanvasY);
             mouseWorldX = worldPos.x;
             mouseWorldY = worldPos.y;
@@ -464,7 +506,24 @@
             mouseInsideCanvas = false;
         }
 
-        // ---------- RENDERING (crosshair, health bar, etc) ----------
+        function handleCanvasClick(e) {
+            if (!gameActive) return;
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            let mouseCanvasX = (e.clientX - rect.left) * scaleX;
+            let mouseCanvasY = (e.clientY - rect.top) * scaleY;
+            mouseCanvasX = Math.min(Math.max(mouseCanvasX, 0), CAM_VIEW_WIDTH);
+            mouseCanvasY = Math.min(Math.max(mouseCanvasY, 0), CAM_VIEW_HEIGHT);
+            const worldTarget = screenToWorld(mouseCanvasX, mouseCanvasY);
+            const now = performance.now() / 1000;
+            if (now - lastShotTime >= SHOT_COOLDOWN) {
+                fireShotgunAt(worldTarget.x, worldTarget.y, now);
+                lastShotTime = now;
+            }
+        }
+
+        // ---------- RENDERING ----------
         function drawGrid() {
             const startX = Math.floor(cameraX / GRID_STEP) * GRID_STEP;
             const startY = Math.floor(cameraY / GRID_STEP) * GRID_STEP;
@@ -528,7 +587,6 @@
             ctx.fillStyle = "#88ffff80";
             ctx.fill();
 
-            // no reload indicator because manual shoot, but show cooldown? optional: display small circle around player when on cooldown
             if (gameActive) {
                 const now = performance.now() / 1000;
                 const timeSinceLast = now - lastShotTime;
@@ -553,32 +611,17 @@
             for (const e of enemies) {
                 const screenPos = worldToScreen(e.x, e.y);
                 if (screenPos.x + ENEMY_RADIUS < 0 || screenPos.x - ENEMY_RADIUS > CAM_VIEW_WIDTH ||
-                    screenPos.y + ENEMY_RADIUS < 0 || screenPos.y - ENEMY_RADIUS > CAM_VIEW_HEIGHT) {
-                    continue;
-                }
-                ctx.shadowBlur = 8;
-                ctx.shadowColor = "#b00000";
+                    screenPos.y + ENEMY_RADIUS < 0 || screenPos.y - ENEMY_RADIUS > CAM_VIEW_HEIGHT) continue;
+                ctx.shadowBlur = 6;
+                ctx.shadowColor = "#2e7d32";
                 ctx.beginPath();
                 ctx.arc(screenPos.x, screenPos.y, ENEMY_RADIUS, 0, Math.PI*2);
                 ctx.fillStyle = ENEMY_COLOR;
                 ctx.fill();
-                ctx.strokeStyle = "#ff8080";
+                ctx.strokeStyle = "#1b5e20";
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
-                ctx.beginPath();
-                ctx.arc(screenPos.x-4, screenPos.y-3, 3, 0, Math.PI*2);
-                ctx.fillStyle = "#ffffff";
-                ctx.fill();
-                ctx.beginPath();
-                ctx.arc(screenPos.x+4, screenPos.y-3, 3, 0, Math.PI*2);
-                ctx.fill();
-                ctx.fillStyle = "#000000";
-                ctx.beginPath();
-                ctx.arc(screenPos.x-4.5, screenPos.y-4, 1.2, 0, Math.PI*2);
-                ctx.fill();
-                ctx.beginPath();
-                ctx.arc(screenPos.x+3.5, screenPos.y-4, 1.2, 0, Math.PI*2);
-                ctx.fill();
+                // no eyes for zombies
             }
             ctx.shadowBlur = 0;
         }
@@ -587,9 +630,7 @@
             for (const p of pellets) {
                 const screenPos = worldToScreen(p.x, p.y);
                 if (screenPos.x + PELLET_RADIUS < 0 || screenPos.x - PELLET_RADIUS > CAM_VIEW_WIDTH ||
-                    screenPos.y + PELLET_RADIUS < 0 || screenPos.y - PELLET_RADIUS > CAM_VIEW_HEIGHT) {
-                    continue;
-                }
+                    screenPos.y + PELLET_RADIUS < 0 || screenPos.y - PELLET_RADIUS > CAM_VIEW_HEIGHT) continue;
                 ctx.beginPath();
                 ctx.arc(screenPos.x, screenPos.y, PELLET_RADIUS-1, 0, Math.PI*2);
                 ctx.fillStyle = PELLET_COLOR;
@@ -601,18 +642,16 @@
             }
         }
 
-        // Draw custom crosshair (aim) at mouse position (screen coordinates)
         function drawCrosshair() {
             if (!mouseInsideCanvas) return;
             const screenMouse = worldToScreen(mouseWorldX, mouseWorldY);
-            // only draw if inside viewport
             if (screenMouse.x < 0 || screenMouse.x > CAM_VIEW_WIDTH || screenMouse.y < 0 || screenMouse.y > CAM_VIEW_HEIGHT) return;
             ctx.save();
             ctx.shadowBlur = 0;
             ctx.strokeStyle = "#ffffff";
             ctx.lineWidth = 2;
-            ctx.beginPath();
             const size = 12;
+            ctx.beginPath();
             ctx.moveTo(screenMouse.x - size, screenMouse.y);
             ctx.lineTo(screenMouse.x - 4, screenMouse.y);
             ctx.moveTo(screenMouse.x + 4, screenMouse.y);
@@ -666,7 +705,7 @@
             drawGrid();
         }
 
-        // ---------- MAIN GAME LOOP ----------
+        // ---------- GAME LOOP ----------
         let lastTimestamp = 0;
 
         function gameLoop(nowMs) {
@@ -678,30 +717,25 @@
                 requestAnimationFrame(gameLoop);
                 return;
             }
-
             let deltaTime = Math.min(0.033, nowSec - lastTimestamp);
             if (deltaTime <= 0) {
                 lastTimestamp = nowSec;
                 requestAnimationFrame(gameLoop);
                 return;
             }
-
             if (gameActive) {
                 gameTimeElapsed += deltaTime;
             }
-
             if (gameActive) {
                 updatePlayer(deltaTime);
                 updateCamera();
-                updateEnemies(deltaTime);
+                updateEnemies(deltaTime, nowSec);
                 updatePellets(deltaTime, nowSec);
                 updateInvincibility(deltaTime);
                 trySpawnEnemy(nowSec);
-                // manual shooting only via click, no auto
             } else {
                 updateCamera();
             }
-
             drawBackground();
             drawPellets();
             drawEnemies();
@@ -709,41 +743,35 @@
             drawHealthBarAbovePlayer();
             drawCrosshair();
             drawUI();
-
-            if (!gameActive) {
-                drawGameOver();
-            }
-
+            if (!gameActive) drawGameOver();
             lastTimestamp = nowSec;
             requestAnimationFrame(gameLoop);
         }
 
-        // ---------- EVENT HANDLERS ----------
+        // ---------- KEYBOARD HANDLERS (using .code for layout independence) ----------
         function handleKeyDown(e) {
-            const key = e.key;
-            if (keys.hasOwnProperty(key)) {
-                keys[key] = true;
+            const code = e.code;
+            if (keyState.hasOwnProperty(code)) {
+                keyState[code] = true;
                 e.preventDefault();
             }
-            if (key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight') {
+            // prevent arrow key scrolling
+            if (code === 'ArrowUp' || code === 'ArrowDown' || code === 'ArrowLeft' || code === 'ArrowRight') {
                 e.preventDefault();
             }
         }
 
         function handleKeyUp(e) {
-            const key = e.key;
-            if (keys.hasOwnProperty(key)) {
-                keys[key] = false;
+            const code = e.code;
+            if (keyState.hasOwnProperty(code)) {
+                keyState[code] = false;
                 e.preventDefault();
             }
         }
 
         function enableAudioOnFirstInteraction() {
-            if (!audioContext) {
-                initAudio().catch(e => console.warn("audio init error", e));
-            } else if (audioContext.state === 'suspended') {
-                audioContext.resume();
-            }
+            if (!audioContext) initAudio().catch(e=>console.warn);
+            else if (audioContext.state === 'suspended') audioContext.resume();
         }
 
         canvas.addEventListener('click', (e) => {
@@ -752,10 +780,11 @@
         });
         canvas.addEventListener('mousemove', onMouseMove);
         canvas.addEventListener('mouseleave', onMouseLeave);
+        canvas.addEventListener('keydown', handleKeyDown);
+        canvas.addEventListener('keyup', handleKeyUp);
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
 
-        // init game state
         function initGame() {
             enemies = [];
             pellets = [];
@@ -771,7 +800,6 @@
             lastShotTime = nowPerf;
             for (let i = 0; i < 3; i++) spawnEnemy();
             updateCamera();
-            // set mouse world to player start
             mouseWorldX = player.x;
             mouseWorldY = player.y;
         }
@@ -781,7 +809,6 @@
             initGame();
             requestAnimationFrame(gameLoop);
         });
-
         canvas.focus();
     })();
 </script>
