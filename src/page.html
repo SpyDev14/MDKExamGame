@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-	<title>Vampire Survivors-like | Shotgun Arena | With Sound</title>
+	<title>Vampire Survivors-like | Shotgun Arena | Manual Aim + Crosshair</title>
 	<style>
 		* {
 			margin: 0;
@@ -34,27 +34,27 @@
 			margin: 0 auto;
 			border-radius: 12px;
 			box-shadow: 0 0 0 2px #2e3a44, 0 0 0 5px #0f1117;
-			cursor: none;
+			cursor: none; /* скрываем стандартный курсор, рисуем свой прицел */
 		}
 
 		canvas:focus {
 			outline: none;
 		}
 
-		/* subtle start hint for audio */
-		.audio-hint {
+		.controls-hint {
 			position: fixed;
 			bottom: 15px;
 			left: 15px;
-			color: #7e8c8f;
+			color: #b0c4de;
 			font-family: monospace;
 			font-size: 13px;
-			background: rgba(0,0,0,0.6);
-			padding: 5px 12px;
-			border-radius: 20px;
+			background: rgba(0,0,0,0.65);
+			padding: 6px 14px;
+			border-radius: 24px;
 			pointer-events: none;
 			z-index: 100;
 			backdrop-filter: blur(4px);
+			font-weight: bold;
 		}
 	</style>
 </head>
@@ -62,7 +62,9 @@
 <div class="game-container">
 	<canvas id="gameCanvas" width="1000" height="700" tabindex="0"></canvas>
 </div>
-<div class="audio-hint">🔊 Audio ready — click canvas to enable sound if needed</div>
+<div class="controls-hint">
+	🎯 WASD / arrows = move | 🖱️ Left click = shotgun blast | 🔫 Aim with crosshair
+</div>
 
 <script>
 	(function() {
@@ -75,49 +77,34 @@
 		let shotgunBuffer = null;
 		let isAudioEnabled = false;
 
-		// Preload the shotgun sound from the provided GitHub URL (raw OGG)
-		const SHOTGUN_SOUND_URL = "https://github.com/space-wizards/space-station-14/blob/master/Resources/Audio/Weapons/Guns/Gunshots/shotgun.ogg";
-		// We need to fetch the actual raw audio. GitHub blob page is HTML, but raw.githubusercontent.com may work.
-		// Use raw.githubusercontent.com for direct file access (common pattern for GH audio assets)
 		const RAW_AUDIO_URL = "https://raw.githubusercontent.com/space-wizards/space-station-14/master/Resources/Audio/Weapons/Guns/Gunshots/shotgun.ogg";
 
 		async function initAudio() {
 			if (audioContext) return;
 			try {
 				audioContext = new (window.AudioContext || window.webkitAudioContext)();
-				// Fetch the audio file
 				const response = await fetch(RAW_AUDIO_URL);
-				if (!response.ok) {
-					throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-				}
+				if (!response.ok) throw new Error(`HTTP ${response.status}`);
 				const arrayBuffer = await response.arrayBuffer();
 				shotgunBuffer = await audioContext.decodeAudioData(arrayBuffer);
 				isAudioEnabled = true;
-				console.log("Shotgun sound loaded successfully");
+				console.log("Shotgun sound loaded");
 			} catch (err) {
-				console.warn("Could not load shotgun sound from GitHub raw URL. Fallback: no sound.", err);
-				// Fallback: generate a procedural shotgun sound using Web Audio (simple noise burst)
-				// This ensures the game always has audio feedback even if network fetch fails.
+				console.warn("Could not load remote sound, using procedural shotgun sound", err);
 				createProceduralShotgunSound();
-				isAudioEnabled = true; // procedural sound is available
+				isAudioEnabled = true;
 			}
 		}
 
-		// Fallback: create a synthetic shotgun blast using Web Audio oscillator + noise
 		function createProceduralShotgunSound() {
 			if (!audioContext) return;
-			// We store a function that generates a short burst of filtered noise.
-			// Instead of a buffer, we'll define a function that plays a procedural sound.
-			shotgunBuffer = null; // indicate we're using procedural mode
+			// просто помечаем, что буфера нет, но функция playSoundInternal сделает синтез
 		}
 
 		function playShotgunSound() {
 			if (!audioContext || !isAudioEnabled) return;
-			// Resume context if suspended (browser autoplay policy)
 			if (audioContext.state === 'suspended') {
-				audioContext.resume().then(() => {
-					playSoundInternal();
-				}).catch(e => console.log("Audio resume failed", e));
+				audioContext.resume().then(() => playSoundInternal()).catch(e=>console.log);
 			} else {
 				playSoundInternal();
 			}
@@ -126,59 +113,49 @@
 		function playSoundInternal() {
 			if (!audioContext || !isAudioEnabled) return;
 			if (shotgunBuffer) {
-				// Buffer-based playback
 				const source = audioContext.createBufferSource();
 				source.buffer = shotgunBuffer;
 				source.connect(audioContext.destination);
 				source.start();
 			} else {
-				// Procedural fallback: generate a distinctive shotgun-like whoosh + blast
+				// procedural shotgun sound (noise burst)
 				const now = audioContext.currentTime;
 				const masterGain = audioContext.createGain();
-				masterGain.gain.setValueAtTime(0.6, now);
+				masterGain.gain.setValueAtTime(0.55, now);
 				masterGain.connect(audioContext.destination);
 
-				// Noise burst (low-pass filtered)
 				const bufferSize = 4096;
 				const noiseNode = audioContext.createScriptProcessor(bufferSize, 1, 1);
 				noiseNode.onaudioprocess = function(e) {
 					const output = e.outputBuffer.getChannelData(0);
 					for (let i = 0; i < bufferSize; i++) {
-						output[i] = (Math.random() * 2 - 1) * 0.8;
+						output[i] = (Math.random() * 2 - 1) * 0.7;
 					}
 				};
 				const filter = audioContext.createBiquadFilter();
 				filter.type = "lowpass";
-				filter.frequency.value = 800;
-				filter.Q.value = 5;
+				filter.frequency.value = 700;
+				filter.Q.value = 4;
 				noiseNode.connect(filter);
 				filter.connect(masterGain);
-
-				// Envelope: short burst
-				masterGain.gain.setValueAtTime(0.7, now);
-				masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
-
+				masterGain.gain.setValueAtTime(0.6, now);
+				masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
 				noiseNode.start();
-				noiseNode.stop(now + 0.3);
-				// Also add a slight low-frequency thump
+				noiseNode.stop(now + 0.25);
+
 				const osc = audioContext.createOscillator();
 				osc.type = "sine";
-				osc.frequency.value = 90;
+				osc.frequency.value = 80;
 				const thumpGain = audioContext.createGain();
-				thumpGain.gain.setValueAtTime(0.5, now);
-				thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+				thumpGain.gain.setValueAtTime(0.4, now);
+				thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
 				osc.connect(thumpGain);
 				thumpGain.connect(masterGain);
 				osc.start();
-				osc.stop(now + 0.15);
-
-				// auto clean
+				osc.stop(now + 0.12);
 				setTimeout(() => {
-					try {
-						noiseNode.disconnect();
-						masterGain.disconnect();
-					} catch(e) {}
-				}, 400);
+					try { noiseNode.disconnect(); masterGain.disconnect(); } catch(e) {}
+				}, 300);
 			}
 		}
 
@@ -188,7 +165,6 @@
 		const CAM_VIEW_WIDTH = canvas.width;
 		const CAM_VIEW_HEIGHT = canvas.height;
 
-		// Camera position (top-left corner of viewport in world coordinates)
 		let cameraX = 0, cameraY = 0;
 
 		// ---------- GAME CONSTANTS ----------
@@ -204,7 +180,10 @@
 		const HEALTH_BAR_HEIGHT = 7;
 		const HEALTH_BAR_OFFSET_Y = -22;
 
-		const SHOT_COOLDOWN = 0.8;
+		// shotgun cooldown between manual shots
+		const SHOT_COOLDOWN = 0.55;       // seconds
+		let lastShotTime = 0;
+
 		const PELLET_COUNT_MIN = 5;
 		const PELLET_COUNT_MAX = 8;
 		const PELLET_RADIUS = 4;
@@ -225,7 +204,6 @@
 
 		const START_HEALTH = 5;
 		const INVINCIBLE_DURATION = 0.5;
-
 		const SPAWN_EXTRA_RADIUS = 250;
 
 		// ---------- GLOBAL STATE ----------
@@ -242,11 +220,15 @@
 		let enemies = [];
 		let pellets = [];
 
-		let lastShotTime = 0;
 		let lastSpawnTime = 0;
 		let invincibleTimer = 0;
 		let gameTimeElapsed = 0;
 
+		// Mouse position (for crosshair) in world coordinates
+		let mouseWorldX = player.x, mouseWorldY = player.y;
+		let mouseInsideCanvas = false;
+
+		// Input keys
 		const keys = {
 			ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false,
 			w: false, s: false, a: false, d: false
@@ -272,6 +254,11 @@
 			return { x: worldX - cameraX, y: worldY - cameraY };
 		}
 
+		function screenToWorld(screenX, screenY) {
+			return { x: screenX + cameraX, y: screenY + cameraY };
+		}
+
+		// Spawn enemy outside camera view
 		function spawnEnemy() {
 			const viewLeft = cameraX;
 			const viewRight = cameraX + CAM_VIEW_WIDTH;
@@ -298,40 +285,21 @@
 
 			spawnX = Math.min(Math.max(spawnX, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
 			spawnY = Math.min(Math.max(spawnY, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
-
 			enemies.push({ x: spawnX, y: spawnY, radius: ENEMY_RADIUS, hp: ENEMY_HP });
 		}
 
-		function findNearestEnemy() {
-			if (enemies.length === 0) return null;
-			let minDist = Infinity;
-			let nearestIdx = -1;
-			for (let i = 0; i < enemies.length; i++) {
-				const e = enemies[i];
-				const dx = e.x - player.x;
-				const dy = e.y - player.y;
-				const dist = Math.hypot(dx, dy);
-				if (dist < minDist) {
-					minDist = dist;
-					nearestIdx = i;
-				}
-			}
-			if (nearestIdx === -1) return null;
-			return { enemy: enemies[nearestIdx], index: nearestIdx, distance: minDist };
-		}
-
-		function fireShotgun(now) {
-			const nearest = findNearestEnemy();
-			if (!nearest) return;
-
-			// Play shotgun sound!
-			playShotgunSound();
-
-			const angleToEnemy = Math.atan2(nearest.enemy.y - player.y, nearest.enemy.x - player.x);
+		// Fire shotgun towards target world coordinates (targetX, targetY)
+		function fireShotgunAt(targetX, targetY, now) {
+			// direction from player to target
+			const dx = targetX - player.x;
+			const dy = targetY - player.y;
+			const length = Math.hypot(dx, dy);
+			if (length < 0.001) return; // degenerate
+			const baseAngle = Math.atan2(dy, dx);
 			const pelletCount = Math.floor(Math.random() * (PELLET_COUNT_MAX - PELLET_COUNT_MIN + 1) + PELLET_COUNT_MIN);
 			for (let i = 0; i < pelletCount; i++) {
 				const spread = (Math.random() - 0.5) * 2 * SPREAD_ANGLE_RAD;
-				const angle = angleToEnemy + spread;
+				const angle = baseAngle + spread;
 				const vx = Math.cos(angle) * PELLET_SPEED;
 				const vy = Math.sin(angle) * PELLET_SPEED;
 				pellets.push({
@@ -341,8 +309,11 @@
 					createdTime: now
 				});
 			}
+			// play sound
+			playShotgunSound();
 		}
 
+		// ---------- GAME LOGIC UPDATES ----------
 		function updatePellets(deltaTime, now) {
 			for (let i = pellets.length-1; i >= 0; i--) {
 				const p = pellets[i];
@@ -447,14 +418,6 @@
 			}
 		}
 
-		function tryAutoShoot(now) {
-			if (!gameActive) return;
-			if (now - lastShotTime >= SHOT_COOLDOWN && enemies.length > 0) {
-				fireShotgun(now);
-				lastShotTime = now;
-			}
-		}
-
 		function updateInvincibility(deltaTime) {
 			if (invincibleTimer > 0) {
 				invincibleTimer -= deltaTime;
@@ -462,7 +425,46 @@
 			}
 		}
 
-		// ---------- RENDERING ----------
+		// ---------- MOUSE / SHOOTING (manual) ----------
+		function handleCanvasClick(e) {
+			if (!gameActive) return;
+			// get click coordinates relative to canvas
+			const rect = canvas.getBoundingClientRect();
+			const scaleX = canvas.width / rect.width;
+			const scaleY = canvas.height / rect.height;
+			let mouseCanvasX = (e.clientX - rect.left) * scaleX;
+			let mouseCanvasY = (e.clientY - rect.top) * scaleY;
+			mouseCanvasX = Math.min(Math.max(mouseCanvasX, 0), CAM_VIEW_WIDTH);
+			mouseCanvasY = Math.min(Math.max(mouseCanvasY, 0), CAM_VIEW_HEIGHT);
+			const worldTarget = screenToWorld(mouseCanvasX, mouseCanvasY);
+
+			const now = performance.now() / 1000;
+			if (now - lastShotTime >= SHOT_COOLDOWN) {
+				fireShotgunAt(worldTarget.x, worldTarget.y, now);
+				lastShotTime = now;
+			}
+		}
+
+		// track mouse movement for crosshair
+		function onMouseMove(e) {
+			const rect = canvas.getBoundingClientRect();
+			const scaleX = canvas.width / rect.width;
+			const scaleY = canvas.height / rect.height;
+			let mouseCanvasX = (e.clientX - rect.left) * scaleX;
+			let mouseCanvasY = (e.clientY - rect.top) * scaleY;
+			mouseCanvasX = Math.min(Math.max(mouseCanvasX, 0), CAM_VIEW_WIDTH);
+			mouseCanvasY = Math.min(Math.max(mouseCanvasY, 0), CAM_VIEW_HEIGHT);
+			const worldPos = screenToWorld(mouseCanvasX, mouseCanvasY);
+			mouseWorldX = worldPos.x;
+			mouseWorldY = worldPos.y;
+			mouseInsideCanvas = true;
+		}
+
+		function onMouseLeave() {
+			mouseInsideCanvas = false;
+		}
+
+		// ---------- RENDERING (crosshair, health bar, etc) ----------
 		function drawGrid() {
 			const startX = Math.floor(cameraX / GRID_STEP) * GRID_STEP;
 			const startY = Math.floor(cameraY / GRID_STEP) * GRID_STEP;
@@ -526,19 +528,19 @@
 			ctx.fillStyle = "#88ffff80";
 			ctx.fill();
 
-			if (gameActive && enemies.length > 0) {
+			// no reload indicator because manual shoot, but show cooldown? optional: display small circle around player when on cooldown
+			if (gameActive) {
 				const now = performance.now() / 1000;
-				const timeSinceLastShot = now - lastShotTime;
-				let cooldownRemaining = SHOT_COOLDOWN - timeSinceLastShot;
-				if (cooldownRemaining < 0) cooldownRemaining = 0;
-				const progress = 1 - (cooldownRemaining / SHOT_COOLDOWN);
-				if (progress < 1) {
+				const timeSinceLast = now - lastShotTime;
+				if (timeSinceLast < SHOT_COOLDOWN) {
+					const cooldownRemaining = SHOT_COOLDOWN - timeSinceLast;
+					const progress = 1 - (cooldownRemaining / SHOT_COOLDOWN);
 					const radius = PLAYER_RADIUS + 6;
 					const startAngle = -Math.PI / 2;
 					const endAngle = startAngle + (Math.PI * 2 * progress);
 					ctx.beginPath();
 					ctx.arc(pos.x, pos.y, radius, startAngle, endAngle);
-					ctx.lineWidth = 3;
+					ctx.lineWidth = 2.5;
 					ctx.strokeStyle = "#FFE484";
 					ctx.stroke();
 				}
@@ -599,6 +601,39 @@
 			}
 		}
 
+		// Draw custom crosshair (aim) at mouse position (screen coordinates)
+		function drawCrosshair() {
+			if (!mouseInsideCanvas) return;
+			const screenMouse = worldToScreen(mouseWorldX, mouseWorldY);
+			// only draw if inside viewport
+			if (screenMouse.x < 0 || screenMouse.x > CAM_VIEW_WIDTH || screenMouse.y < 0 || screenMouse.y > CAM_VIEW_HEIGHT) return;
+			ctx.save();
+			ctx.shadowBlur = 0;
+			ctx.strokeStyle = "#ffffff";
+			ctx.lineWidth = 2;
+			ctx.beginPath();
+			const size = 12;
+			ctx.moveTo(screenMouse.x - size, screenMouse.y);
+			ctx.lineTo(screenMouse.x - 4, screenMouse.y);
+			ctx.moveTo(screenMouse.x + 4, screenMouse.y);
+			ctx.lineTo(screenMouse.x + size, screenMouse.y);
+			ctx.moveTo(screenMouse.x, screenMouse.y - size);
+			ctx.lineTo(screenMouse.x, screenMouse.y - 4);
+			ctx.moveTo(screenMouse.x, screenMouse.y + 4);
+			ctx.lineTo(screenMouse.x, screenMouse.y + size);
+			ctx.stroke();
+			ctx.beginPath();
+			ctx.arc(screenMouse.x, screenMouse.y, 6, 0, Math.PI * 2);
+			ctx.strokeStyle = "#aaffdd";
+			ctx.lineWidth = 1.5;
+			ctx.stroke();
+			ctx.beginPath();
+			ctx.arc(screenMouse.x, screenMouse.y, 2, 0, Math.PI * 2);
+			ctx.fillStyle = "#ffcc77";
+			ctx.fill();
+			ctx.restore();
+		}
+
 		function drawUI() {
 			ctx.font = "bold 26 'Courier New', monospace";
 			ctx.shadowBlur = 0;
@@ -606,7 +641,7 @@
 			ctx.fillText(`🎯 ${score}`, CAM_VIEW_WIDTH - 135, 52);
 			ctx.font = "bold 18 monospace";
 			ctx.fillStyle = "#afd5ff";
-			ctx.fillText("⚡ AUTO SHOTGUN", CAM_VIEW_WIDTH - 210, 100);
+			ctx.fillText("⚡ CLICK TO SHOOT", CAM_VIEW_WIDTH - 220, 100);
 		}
 
 		function drawGameOver() {
@@ -631,7 +666,7 @@
 			drawGrid();
 		}
 
-		// ---------- GAME LOOP ----------
+		// ---------- MAIN GAME LOOP ----------
 		let lastTimestamp = 0;
 
 		function gameLoop(nowMs) {
@@ -662,7 +697,7 @@
 				updatePellets(deltaTime, nowSec);
 				updateInvincibility(deltaTime);
 				trySpawnEnemy(nowSec);
-				tryAutoShoot(nowSec);
+				// manual shooting only via click, no auto
 			} else {
 				updateCamera();
 			}
@@ -672,6 +707,7 @@
 			drawEnemies();
 			drawPlayer();
 			drawHealthBarAbovePlayer();
+			drawCrosshair();
 			drawUI();
 
 			if (!gameActive) {
@@ -682,7 +718,7 @@
 			requestAnimationFrame(gameLoop);
 		}
 
-		// ---------- INPUT HANDLERS ----------
+		// ---------- EVENT HANDLERS ----------
 		function handleKeyDown(e) {
 			const key = e.key;
 			if (keys.hasOwnProperty(key)) {
@@ -702,10 +738,24 @@
 			}
 		}
 
-		canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+		function enableAudioOnFirstInteraction() {
+			if (!audioContext) {
+				initAudio().catch(e => console.warn("audio init error", e));
+			} else if (audioContext.state === 'suspended') {
+				audioContext.resume();
+			}
+		}
+
+		canvas.addEventListener('click', (e) => {
+			enableAudioOnFirstInteraction();
+			handleCanvasClick(e);
+		});
+		canvas.addEventListener('mousemove', onMouseMove);
+		canvas.addEventListener('mouseleave', onMouseLeave);
 		window.addEventListener('keydown', handleKeyDown);
 		window.addEventListener('keyup', handleKeyUp);
 
+		// init game state
 		function initGame() {
 			enemies = [];
 			pellets = [];
@@ -719,32 +769,19 @@
 			const nowPerf = performance.now() / 1000;
 			lastSpawnTime = nowPerf;
 			lastShotTime = nowPerf;
-			for (let i = 0; i < 3; i++) {
-				spawnEnemy();
-			}
+			for (let i = 0; i < 3; i++) spawnEnemy();
 			updateCamera();
+			// set mouse world to player start
+			mouseWorldX = player.x;
+			mouseWorldY = player.y;
 		}
 
-		// Enable audio on first user interaction (click/tap on canvas)
-		function enableAudioOnFirstClick() {
-			if (!audioContext) {
-				initAudio().catch(e => console.warn("audio init error", e));
-			} else if (audioContext.state === 'suspended') {
-				audioContext.resume();
-			}
-			canvas.removeEventListener('click', enableAudioOnFirstClick);
-			canvas.removeEventListener('keydown', enableAudioOnFirstClick);
-		}
-
-		canvas.addEventListener('click', enableAudioOnFirstClick);
-		canvas.addEventListener('keydown', enableAudioOnFirstClick);
-		// also try to init audio on window load
 		window.addEventListener('load', () => {
-			initAudio().catch(e => console.log("Audio not initialized yet", e));
+			initAudio().catch(e=>console.log);
+			initGame();
+			requestAnimationFrame(gameLoop);
 		});
 
-		initGame();
-		requestAnimationFrame(gameLoop);
 		canvas.focus();
 	})();
 </script>
