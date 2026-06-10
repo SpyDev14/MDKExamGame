@@ -295,10 +295,14 @@
         const ENEMY_HP = 1;                           // здоровье врага (1 = убиваются с одного попадания)
 
         // ------ Сложность (спавн) ------
-        const SPAWN_INTERVAL_START = 1.25;             // секунд между спавнами в начале
-        const SPAWN_INTERVAL_MIN = 0.25;               // минимальный интервал
-        const SPAWN_INTERVAL_DECAY_RATE = 0.02;        // уменьшение интервала каждую секунду
-        const SPAWN_EXTRA_RADIUS = 250;                // враги появляются за пределами экрана
+        const SPAWN_INTERVAL_START = 1.5;      // секунд между спавнами в начале (редко)
+        const SPAWN_INTERVAL_END = 0.35;       // финальный минимальный интервал (макс. сложность)
+        const SPAWN_RAMP_UP_TIME = 120;        // время в секундах, за которое интервал достигает SPAWN_INTERVAL_END
+        // Параметр экспоненциального затухания: через SPAWN_RAMP_UP_TIME разница сокращается до 1% (epsilon)
+        const SPAWN_EPSILON = 0.01;            // 1% от начальной разницы — интервал практически равен конечному
+        // Предрасчёт константы времени tau для экспоненты (не меняется во время игры)
+        const SPAWN_TAU = -SPAWN_RAMP_UP_TIME / Math.log(SPAWN_EPSILON);
+        const SPAWN_EXTRA_RADIUS = 250;        // враги появляются за пределами экрана
 
         // ------ Визуальные настройки ------
         const BACKGROUND_COLOR = '#151e27';
@@ -306,7 +310,7 @@
         const GRID_STEP = 60;
         const HEALTH_BAR_WIDTH = 40;
         const HEALTH_BAR_HEIGHT = 7;
-        const HEALTH_BAR_OFFSET_Y = -34;
+        const HEALTH_BAR_OFFSET_Y = -32;
 
         // ------ Ключи для localStorage ------
         const HIGHSCORE_KEY = 'shotgun_highscore';
@@ -327,7 +331,7 @@
         const volumeValueSpan = document.getElementById('volumeValue');
 
         // ===========================
-        // ЗВУКИ
+        // ЗВУКОВОЙ МЕНЕДЖМЕНТ
         // ===========================
         let masterVolume = 0.7;       // по умолчанию 70%
         let audioEnabled = false;
@@ -560,8 +564,12 @@
 
         // ------ Сложность спавна ------
         function getCurrentSpawnInterval() {
-            let interval = SPAWN_INTERVAL_START - (gameTimeElapsed * SPAWN_INTERVAL_DECAY_RATE);
-            if (interval < SPAWN_INTERVAL_MIN) interval = SPAWN_INTERVAL_MIN;
+            const t = Math.min(gameTimeElapsed, SPAWN_RAMP_UP_TIME);
+            // Экспоненциальная интерполяция: interval = end + (start - end) * exp(-t / tau)
+            const ratio = Math.exp(-t / SPAWN_TAU);
+            let interval = SPAWN_INTERVAL_END + (SPAWN_INTERVAL_START - SPAWN_INTERVAL_END) * ratio;
+            // Защита от выхода за границы (гарантируем, что не станет меньше конечного)
+            if (interval < SPAWN_INTERVAL_END) interval = SPAWN_INTERVAL_END;
             return interval;
         }
 
