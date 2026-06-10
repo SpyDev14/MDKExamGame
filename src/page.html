@@ -1,10 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>BVV Game</title>
+    <title>BVV Game — Зомби-шутер с видом сверху</title>
     <style>
+        /* ---------- RESET & GLOBAL ---------- */
         * {
             margin: 0;
             padding: 0;
@@ -22,6 +23,7 @@
             overflow: hidden;
         }
 
+        /* ---------- ИГРОВОЙ КОНТЕЙНЕР ---------- */
         .game-container {
             position: relative;
             background: #11131a;
@@ -42,6 +44,7 @@
             outline: none;
         }
 
+        /* ---------- ИНТЕРФЕЙС (ПОВЕРХ CANVAS) ---------- */
         .game-ui {
             position: absolute;
             top: 0;
@@ -49,7 +52,6 @@
             width: 100%;
             height: 100%;
             pointer-events: none;
-            font-family: 'Courier New', 'Monaco', monospace;
             z-index: 10;
         }
 
@@ -63,6 +65,7 @@
             backdrop-filter: blur(4px);
             pointer-events: none;
         }
+
         .score {
             font-size: 28px;
             font-weight: bold;
@@ -70,6 +73,7 @@
             text-shadow: 0 0 5px #ffa500;
             letter-spacing: 1px;
         }
+
         .best {
             font-size: 18px;
             color: #e0b86e;
@@ -91,6 +95,7 @@
             pointer-events: none;
         }
 
+        /* ---------- ЭКРАН GAME OVER ---------- */
         .gameover-panel {
             position: absolute;
             top: 0;
@@ -109,12 +114,14 @@
             visibility: hidden;
             border-radius: 12px;
         }
+
         .gameover-panel h1 {
             font-size: 56px;
             color: #f04e4e;
             text-shadow: 0 0 10px #8b0000;
             letter-spacing: 4px;
         }
+
         .final-score {
             font-size: 32px;
             color: #ddbb77;
@@ -123,11 +130,13 @@
             border-radius: 40px;
             font-weight: bold;
         }
+
         .best-score {
             font-size: 22px;
             color: #ffcc88;
             margin-top: 4px;
         }
+
         .restart-btn {
             margin-top: 20px;
             background: #4a6e8a;
@@ -143,23 +152,21 @@
             box-shadow: 0 4px 0 #1f3a4b;
             pointer-events: auto;
         }
+
         .restart-btn:hover {
             background: #5f85a3;
             transform: translateY(-2px);
             box-shadow: 0 6px 0 #1f3a4b;
         }
+
         .restart-btn:active {
             transform: translateY(4px);
             box-shadow: 0 0px 0 #1f3a4b;
         }
-
-        canvas:active, canvas:focus {
-            cursor: none;
-        }
     </style>
 </head>
 <body>
-<div class="game-container" style="position: relative;">
+<div class="game-container">
     <canvas id="gameCanvas" width="1000" height="700" tabindex="0"></canvas>
     <div class="game-ui">
         <div class="stats">
@@ -180,11 +187,72 @@
 
 <script>
     (function() {
-        // ---------- CANVAS ----------
+        'use strict';
+
+        // ===========================
+        // 1. КОНСТАНТЫ И НАСТРОЙКИ ИГРЫ
+        // ===========================
+
+        // ------ Размеры мира и камеры ------
+        const WORLD_WIDTH = 4000;
+        const WORLD_HEIGHT = 4000;
+        const CAM_VIEW_WIDTH = 1000;   // canvas.width
+        const CAM_VIEW_HEIGHT = 700;    // canvas.height
+
+        // ------ Игрок ------
+        const PLAYER_RADIUS = 16;
+        const PLAYER_COLOR = '#2ad4ff';
+        const PLAYER_MAX_SPEED = 340;
+        const PLAYER_ACCEL_TIME = 0.25;              // секунд до максимальной скорости
+        const PLAYER_ACCEL = PLAYER_MAX_SPEED / PLAYER_ACCEL_TIME;
+        const RECOIL_FORCE = 600;                    // отдача от выстрела
+        const KNOCKBACK_FORCE = 900;                 // отбрасывание при укусе
+
+        // ------ Здоровье и неуязвимость ------
+        const START_HEALTH = 5;
+        const INVINCIBLE_DURATION = 0.75;             // секунды после получения урона
+
+        // ------ Дробовик ------
+        const SHOT_COOLDOWN = 0.55;                   // секунды между выстрелами
+        const PELLET_COUNT_MIN = 5;
+        const PELLET_COUNT_MAX = 8;
+        const PELLET_RADIUS = 4;
+        const PELLET_SPEED = 430;
+        const PELLET_LIFESPAN = 0.65;                 // секунды жизни пули
+        const PELLET_COLOR = '#FFD966';
+        const SPREAD_ANGLE_DEG = 25;
+        const SPREAD_ANGLE_RAD = SPREAD_ANGLE_DEG * Math.PI / 180;
+
+        // ------ Враги (зомби) ------
+        const ENEMY_RADIUS = 13;
+        const ENEMY_COLOR = '#4CAF50';
+        const ENEMY_BASE_SPEED = 112;
+        const ACCELERATION_RADIUS = 9 * PLAYER_RADIUS; // враги ускоряются ближе к игроку
+        const ENEMY_ACCEL_FACTOR = 1.75;
+        const ENEMY_HP = 1;                           // здоровье врага (1 = убиваются с одного попадания)
+
+        // ------ Сложность (спавн) ------
+        const SPAWN_INTERVAL_START = 1.25;             // секунд между спавнами в начале
+        const SPAWN_INTERVAL_MIN = 0.25;               // минимальный интервал
+        const SPAWN_INTERVAL_DECAY_RATE = 0.02;        // уменьшение интервала каждую секунду
+        const SPAWN_EXTRA_RADIUS = 250;                // враги появляются за пределами экрана
+
+        // ------ Визуальные настройки ------
+        const BACKGROUND_COLOR = '#151e27';
+        const GRID_COLOR = '#253644';
+        const GRID_STEP = 60;
+        const HEALTH_BAR_WIDTH = 40;
+        const HEALTH_BAR_HEIGHT = 7;
+        const HEALTH_BAR_OFFSET_Y = -34;
+
+        // ------ Ключи для localStorage ------
+        const HIGHSCORE_KEY = 'shotgun_highscore';
+
+        // ===========================
+        // 2. DOM-ЭЛЕМЕНТЫ
+        // ===========================
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
-
-        // ---------- HTML UI elements ----------
         const uiScoreSpan = document.getElementById('uiScore');
         const uiBestSpan = document.getElementById('uiBest');
         const gameoverPanel = document.getElementById('gameoverPanel');
@@ -192,10 +260,150 @@
         const finalBestSpan = document.getElementById('finalBestSpan');
         const restartBtn = document.getElementById('restartButton');
 
-        // ---------- HIGH SCORE (localStorage) ----------
-        let highScore = 0;
-        const HIGHSCORE_KEY = 'shotgun_highscore';
+        // ===========================
+        // 3. ЗВУКИ
+        // ===========================
+        let audioEnabled = false;
+        let bgMusic = null;
 
+        const AUDIO_PATHS = {
+            shotgun: "resources/audio/shotgun-shot.ogg",
+            bite: "resources/audio/bite.ogg",
+            theme: "resources/audio/main-theme.ogg",
+            zombie: [
+                "resources/audio/zombie-1.ogg",
+                "resources/audio/zombie-2.ogg",
+                "resources/audio/zombie-3.ogg"
+            ],
+            bodyfall: [
+                "resources/audio/bodyfall-1.ogg",
+                "resources/audio/bodyfall-2.ogg",
+                "resources/audio/bodyfall-3.ogg",
+                "resources/audio/bodyfall-4.ogg"
+            ]
+        };
+
+        function playSound(url, volume = 0.7) {
+            if (!audioEnabled) return;
+            try {
+                const audio = new Audio(url);
+                audio.volume = volume;
+                audio.play().catch(e => console.debug("Sound play failed:", e));
+            } catch (e) {}
+        }
+
+        function playShotgunSound()      { playSound(AUDIO_PATHS.shotgun, 0.7); }
+        function playBiteSound()         { playSound(AUDIO_PATHS.bite, 1.0); }
+        function playRandomBodyfallSound() {
+            const idx = Math.floor(Math.random() * AUDIO_PATHS.bodyfall.length);
+            playSound(AUDIO_PATHS.bodyfall[idx], 0.85);
+        }
+        function playRandomZombieSound(distance) {
+            if (!audioEnabled) return;
+            const minDist = 2 * PLAYER_RADIUS;
+            const maxDist = CAM_VIEW_HEIGHT;
+            let volume = 0;
+            if (distance <= minDist) volume = 1.0;
+            else if (distance >= maxDist) volume = 0;
+            else volume = 1.0 * (1 - (distance - minDist) / (maxDist - minDist));
+            volume = Math.min(1.0, Math.max(0, volume));
+            if (volume <= 0.05) return;
+            const idx = Math.floor(Math.random() * AUDIO_PATHS.zombie.length);
+            playSound(AUDIO_PATHS.zombie[idx], volume);
+        }
+
+        function startBackgroundMusic() {
+            if (!audioEnabled || bgMusic) return;
+            try {
+                bgMusic = new Audio(AUDIO_PATHS.theme);
+                bgMusic.loop = true;
+                bgMusic.volume = 0.65;
+                bgMusic.play().catch(e => console.debug("Music autoplay blocked"));
+            } catch (e) {}
+        }
+
+        function stopBackgroundMusic() {
+            if (bgMusic) {
+                bgMusic.pause();
+                bgMusic.currentTime = 0;
+            }
+        }
+
+        function restartBackgroundMusic() {
+            if (!audioEnabled) return;
+            if (bgMusic) {
+                bgMusic.pause();
+                bgMusic.currentTime = 0;
+                bgMusic.play().catch(e => console.debug("Music restart failed"));
+            } else {
+                startBackgroundMusic();
+            }
+        }
+
+        function enableAudio() {
+            if (!audioEnabled) {
+                audioEnabled = true;
+                startBackgroundMusic();
+            }
+        }
+
+        // ===========================
+        // 4. ИГРОВОЕ СОСТОЯНИЕ
+        // ===========================
+        let gameActive = true;
+        let health = START_HEALTH;
+        let score = 0;
+        let highScore = 0;
+        let player = {
+            x: WORLD_WIDTH / 2,
+            y: WORLD_HEIGHT / 2,
+            radius: PLAYER_RADIUS,
+            velX: 0,
+            velY: 0
+        };
+        let enemies = [];         // массив зомби
+        let pellets = [];         // массив пуль
+        let lastSpawnTime = 0;
+        let invincibleTimer = 0;
+        let gameTimeElapsed = 0;  // для нарастания сложности
+
+        // Для прицела: координаты мыши в мире
+        let mouseWorldX = player.x;
+        let mouseWorldY = player.y;
+        let mouseInsideCanvas = false;
+        let rawMouseScreenX = 0, rawMouseScreenY = 0;
+
+        // Камера
+        let cameraX = 0, cameraY = 0;
+
+        // Тайминги
+        let lastShotTime = 0;
+
+        // ===========================
+        // 5. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+        // ===========================
+        function clamp(value, min, max) {
+            return Math.min(max, Math.max(min, value));
+        }
+
+        function limitVelocity(velX, velY, maxSpeed) {
+            const speed = Math.hypot(velX, velY);
+            if (speed > maxSpeed) {
+                const factor = maxSpeed / speed;
+                return { vx: velX * factor, vy: velY * factor };
+            }
+            return { vx: velX, vy: velY };
+        }
+
+        function worldToScreen(worldX, worldY) {
+            return { x: worldX - cameraX, y: worldY - cameraY };
+        }
+
+        function screenToWorld(screenX, screenY) {
+            return { x: screenX + cameraX, y: screenY + cameraY };
+        }
+
+        // ------ Работа с рекордами ------
         function loadHighScore() {
             try {
                 const saved = localStorage.getItem(HIGHSCORE_KEY);
@@ -219,6 +427,7 @@
             uiBestSpan.textContent = highScore;
         }
 
+        // ------ Панель Game Over ------
         function showGameOverUI() {
             finalScoreSpan.textContent = score;
             finalBestSpan.textContent = highScore;
@@ -230,293 +439,168 @@
             gameoverPanel.style.visibility = "hidden";
         }
 
-        // ---------- AUDIO ----------
-        let audioEnabled = false;
-        let bgMusic = null;
-
-        const SHOTGUN_PATH = "resources/audio/shotgun-shot.ogg";
-        const BITE_PATH = "resources/audio/bite.ogg";
-        const THEME_PATH = "resources/audio/main-theme.ogg";
-        const ZOMBIE_PATHS = [
-            "resources/audio/zombie-1.ogg",
-            "resources/audio/zombie-2.ogg",
-            "resources/audio/zombie-3.ogg"
-        ];
-        const BODYFALL_PATHS = [
-            "resources/audio/bodyfall-1.ogg",
-            "resources/audio/bodyfall-2.ogg",
-            "resources/audio/bodyfall-3.ogg",
-            "resources/audio/bodyfall-4.ogg"
-        ];
-
-        function playShotgunSound() {
-            if (!audioEnabled) return;
-            try {
-                const audio = new Audio(SHOTGUN_PATH);
-                audio.volume = 0.7;
-                audio.play().catch(e => console.log("Shotgun play failed", e));
-            } catch(e) {}
+        // ------ Сложность спавна ------
+        function getCurrentSpawnInterval() {
+            let interval = SPAWN_INTERVAL_START - (gameTimeElapsed * SPAWN_INTERVAL_DECAY_RATE);
+            if (interval < SPAWN_INTERVAL_MIN) interval = SPAWN_INTERVAL_MIN;
+            return interval;
         }
 
-        function playBiteSound() {
-            if (!audioEnabled) return;
-            try {
-                const audio = new Audio(BITE_PATH);
-                audio.volume = 1.0;
-                audio.play().catch(e => console.log("Bite play failed", e));
-            } catch(e) {}
+        // ------ Обновление камеры (следим за игроком) ------
+        function updateCamera() {
+            let targetX = player.x - CAM_VIEW_WIDTH / 2;
+            let targetY = player.y - CAM_VIEW_HEIGHT / 2;
+            targetX = clamp(targetX, 0, WORLD_WIDTH - CAM_VIEW_WIDTH);
+            targetY = clamp(targetY, 0, WORLD_HEIGHT - CAM_VIEW_HEIGHT);
+            cameraX = targetX;
+            cameraY = targetY;
         }
 
-        function playRandomBodyfallSound() {
-            if (!audioEnabled) return;
-            const idx = Math.floor(Math.random() * BODYFALL_PATHS.length);
-            try {
-                const audio = new Audio(BODYFALL_PATHS[idx]);
-                audio.volume = 0.85;
-                audio.play().catch(e => console.log("Bodyfall play failed", e));
-            } catch(e) {}
-        }
-
-        function playRandomZombieSound(distance) {
-            if (!audioEnabled) return;
-            const minDistance = 2 * PLAYER_RADIUS;
-            const maxDistance = CAM_VIEW_HEIGHT;
-            let volume = 0;
-            if (distance <= minDistance) volume = 1.0;
-            else if (distance >= maxDistance) volume = 0;
-            else volume = 1.0 * (1 - (distance - minDistance) / (maxDistance - minDistance));
-            volume = Math.min(1.0, Math.max(0, volume));
-            if (volume <= 0.05) return;
-            const idx = Math.floor(Math.random() * ZOMBIE_PATHS.length);
-            try {
-                const audio = new Audio(ZOMBIE_PATHS[idx]);
-                audio.volume = volume;
-                audio.play().catch(e => console.log("Zombie groan failed", e));
-            } catch(e) {}
-        }
-
-        function startBackgroundMusic() {
-            if (!audioEnabled) return;
-            if (bgMusic) {
-                bgMusic.currentTime = 0;
-                bgMusic.play().catch(e => console.log("Background resume failed", e));
-                return;
+        // ------ Спавн одного врага за пределами видимости ------
+        function spawnEnemy() {
+            const viewLeft = cameraX, viewRight = cameraX + CAM_VIEW_WIDTH;
+            const viewTop = cameraY, viewBottom = cameraY + CAM_VIEW_HEIGHT;
+            let spawnX, spawnY;
+            const side = Math.floor(Math.random() * 4);
+            const margin = SPAWN_EXTRA_RADIUS;
+            if (side === 0) { // слева
+                spawnX = viewLeft - margin - Math.random() * margin * 0.8;
+                spawnY = viewTop + Math.random() * CAM_VIEW_HEIGHT;
+            } else if (side === 1) { // справа
+                spawnX = viewRight + margin + Math.random() * margin * 0.8;
+                spawnY = viewTop + Math.random() * CAM_VIEW_HEIGHT;
+            } else if (side === 2) { // сверху
+                spawnX = viewLeft + Math.random() * CAM_VIEW_WIDTH;
+                spawnY = viewTop - margin - Math.random() * margin * 0.8;
+            } else { // снизу
+                spawnX = viewLeft + Math.random() * CAM_VIEW_WIDTH;
+                spawnY = viewBottom + margin + Math.random() * margin * 0.8;
             }
-            try {
-                bgMusic = new Audio(THEME_PATH);
-                bgMusic.loop = true;
-                bgMusic.volume = 0.65;
-                bgMusic.play().catch(e => console.log("Background music play failed", e));
-            } catch(e) {}
+            spawnX = clamp(spawnX, ENEMY_RADIUS, WORLD_WIDTH - ENEMY_RADIUS);
+            spawnY = clamp(spawnY, ENEMY_RADIUS, WORLD_HEIGHT - ENEMY_RADIUS);
+            enemies.push({
+                x: spawnX,
+                y: spawnY,
+                radius: ENEMY_RADIUS,
+                hp: ENEMY_HP,
+                lastGroanTime: 0
+            });
         }
 
-        function stopBackgroundMusic() {
-            if (bgMusic) {
-                bgMusic.pause();
-                bgMusic.currentTime = 0;
-            }
-        }
-
-        function restartBackgroundMusic() {
-            if (!audioEnabled) return;
-            if (bgMusic) {
-                bgMusic.pause();
-                bgMusic.currentTime = 0;
-                bgMusic.play().catch(e => console.log("Background restart failed", e));
-            } else {
-                startBackgroundMusic();
-            }
-        }
-
-        function enableAudio() {
-            if (!audioEnabled) {
-                audioEnabled = true;
-                startBackgroundMusic();
-                console.log("Audio enabled");
-            }
-        }
-
-        // ---------- WORLD & CAMERA ----------
-        const WORLD_WIDTH = 4000;
-        const WORLD_HEIGHT = 4000;
-        const CAM_VIEW_WIDTH = canvas.width;
-        const CAM_VIEW_HEIGHT = canvas.height;
-        let cameraX = 0, cameraY = 0;
-
-        // ---------- GAME CONSTANTS ----------
-        const BACKGROUND_COLOR = '#151e27';
-        const GRID_COLOR = '#253644';
-        const GRID_STEP = 60;
-        const PLAYER_RADIUS = 16;
-        const PLAYER_COLOR = '#2ad4ff';
-        const PLAYER_MAX_SPEED = 340;
-        const PLAYER_ACCEL_TIME = 0.25;
-        const PLAYER_ACCEL = PLAYER_MAX_SPEED / PLAYER_ACCEL_TIME;
-        const RECOIL_FORCE = 280 * 1.5;
-        const KNOCKBACK_FORCE = 380;
-        const HEALTH_BAR_WIDTH = 40;
-        const HEALTH_BAR_HEIGHT = 7;
-        const HEALTH_BAR_OFFSET_Y = -34;
-        const SHOT_COOLDOWN = 0.55;
-        let lastShotTime = 0;
-        const PELLET_COUNT_MIN = 5;
-        const PELLET_COUNT_MAX = 8;
-        const PELLET_RADIUS = 4;
-        const PELLET_SPEED = 430;
-        const PELLET_LIFESPAN = 0.65;
-        const PELLET_COLOR = '#FFD966';
-        const SPREAD_ANGLE_DEG = 25;
-        const SPREAD_ANGLE_RAD = SPREAD_ANGLE_DEG * Math.PI / 180;
-        const ENEMY_RADIUS = 13;
-        const ENEMY_COLOR = '#4CAF50';
-        const ENEMY_BASE_SPEED = 112;
-        const ACCELERATION_RADIUS = 9 * PLAYER_RADIUS;
-        const ENEMY_ACCEL_FACTOR = 1.75;
-        const ENEMY_HP = 1;
-
-        // ---------- НАРАСТАНИЕ СЛОЖНОСТИ ----------
-        const SPAWN_INTERVAL_START = 1.25;
-        const SPAWN_INTERVAL_MIN = 0.25;
-        const SPAWN_INTERVAL_DECAY_RATE = 0.02;
-        // ------------------------------------------------
-
-        const START_HEALTH = 5;
-        const INVINCIBLE_DURATION = 0.75;
-        const SPAWN_EXTRA_RADIUS = 250;
-
-        // ---------- GLOBAL STATE ----------
-        let gameActive = true;
-        let health = START_HEALTH;
-        let score = 0;
-        let player = { x: WORLD_WIDTH/2, y: WORLD_HEIGHT/2, radius: PLAYER_RADIUS, velX: 0, velY: 0 };
-        let enemies = [];
-        let pellets = [];
-        let lastSpawnTime = 0;
-        let invincibleTimer = 0;
-        let gameTimeElapsed = 0;
-
-        let mouseWorldX = player.x, mouseWorldY = player.y;
-        let mouseInsideCanvas = false;
-        let rawMouseScreenX = 0, rawMouseScreenY = 0;
-
-        // ---------- INPUT ----------
-        const keyState = {
-            KeyW: false, KeyA: false, KeyS: false, KeyD: false,
-            ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false
-        };
-        function getMovementDirection() {
+        // ===========================
+        // 6. ЛОГИКА ОБНОВЛЕНИЯ
+        // ===========================
+        function updatePlayer(deltaTime) {
+            // Собираем направление движения (WASD + стрелки)
             let moveX = 0, moveY = 0;
             if (keyState.ArrowUp || keyState.KeyW) moveY -= 1;
             if (keyState.ArrowDown || keyState.KeyS) moveY += 1;
             if (keyState.ArrowLeft || keyState.KeyA) moveX -= 1;
             if (keyState.ArrowRight || keyState.KeyD) moveX += 1;
-            if (moveX !== 0 || moveY !== 0) { const len = Math.hypot(moveX, moveY); moveX /= len; moveY /= len; }
-            return { moveX, moveY };
-        }
-
-        // ---------- HELPER FUNCTIONS ----------
-        function getCurrentSpawnInterval() {
-            let interval = SPAWN_INTERVAL_START - (gameTimeElapsed * SPAWN_INTERVAL_DECAY_RATE);
-            // Epsilon: интервал не может стать меньше 0.05 секунд (технический предел)
-            if (interval < SPAWN_INTERVAL_MIN) interval = SPAWN_INTERVAL_MIN;
-            return interval;
-        }
-        function updateCamera() {
-            let targetX = player.x - CAM_VIEW_WIDTH/2;
-            let targetY = player.y - CAM_VIEW_HEIGHT/2;
-            targetX = Math.min(Math.max(targetX, 0), WORLD_WIDTH - CAM_VIEW_WIDTH);
-            targetY = Math.min(Math.max(targetY, 0), WORLD_HEIGHT - CAM_VIEW_HEIGHT);
-            cameraX = targetX; cameraY = targetY;
-        }
-        function worldToScreen(worldX, worldY) { return { x: worldX - cameraX, y: worldY - cameraY }; }
-        function screenToWorld(screenX, screenY) { return { x: screenX + cameraX, y: screenY + cameraY }; }
-
-        function spawnEnemy() {
-            const viewLeft = cameraX, viewRight = cameraX + CAM_VIEW_WIDTH;
-            const viewTop = cameraY, viewBottom = cameraY + CAM_VIEW_HEIGHT;
-            let spawnX, spawnY; const side = Math.floor(Math.random() * 4); const margin = SPAWN_EXTRA_RADIUS;
-            if (side === 0) { spawnX = viewLeft - margin - Math.random()*margin*0.8; spawnY = viewTop + Math.random()*CAM_VIEW_HEIGHT; }
-            else if (side === 1) { spawnX = viewRight + margin + Math.random()*margin*0.8; spawnY = viewTop + Math.random()*CAM_VIEW_HEIGHT; }
-            else if (side === 2) { spawnX = viewLeft + Math.random()*CAM_VIEW_WIDTH; spawnY = viewTop - margin - Math.random()*margin*0.8; }
-            else { spawnX = viewLeft + Math.random()*CAM_VIEW_WIDTH; spawnY = viewBottom + margin + Math.random()*margin*0.8; }
-            spawnX = Math.min(Math.max(spawnX, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
-            spawnY = Math.min(Math.max(spawnY, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
-            enemies.push({ x: spawnX, y: spawnY, radius: ENEMY_RADIUS, hp: ENEMY_HP, lastGroanTime: 0 });
-        }
-
-        function fireShotgunAt(targetX, targetY, now) {
-            const dx = targetX - player.x, dy = targetY - player.y;
-            const length = Math.hypot(dx, dy);
-            if (length < 0.001) return;
-            const baseAngle = Math.atan2(dy, dx);
-            const pelletCount = Math.floor(Math.random() * (PELLET_COUNT_MAX - PELLET_COUNT_MIN + 1) + PELLET_COUNT_MIN);
-            for (let i=0; i<pelletCount; i++) {
-                const spread = (Math.random() - 0.5)*2*SPREAD_ANGLE_RAD;
-                const angle = baseAngle + spread;
-                const vx = Math.cos(angle)*PELLET_SPEED;
-                const vy = Math.sin(angle)*PELLET_SPEED;
-                pellets.push({ x: player.x, y: player.y, vx, vy, radius: PELLET_RADIUS, lifeSpan: PELLET_LIFESPAN, createdTime: now });
+            if (moveX !== 0 || moveY !== 0) {
+                const len = Math.hypot(moveX, moveY);
+                moveX /= len;
+                moveY /= len;
             }
-            // Recoil
-            const recoilDirX = -dx/length, recoilDirY = -dy/length;
-            player.velX += recoilDirX * RECOIL_FORCE;
-            player.velY += recoilDirY * RECOIL_FORCE;
-            const speed = Math.hypot(player.velX, player.velY);
-            if (speed > PLAYER_MAX_SPEED) { player.velX = (player.velX/speed)*PLAYER_MAX_SPEED; player.velY = (player.velY/speed)*PLAYER_MAX_SPEED; }
-            playShotgunSound();
+
+            const hasInput = (moveX !== 0 || moveY !== 0);
+            if (hasInput) {
+                player.velX += moveX * PLAYER_ACCEL * deltaTime;
+                player.velY += moveY * PLAYER_ACCEL * deltaTime;
+                const limited = limitVelocity(player.velX, player.velY, PLAYER_MAX_SPEED);
+                player.velX = limited.vx;
+                player.velY = limited.vy;
+            } else {
+                const speed = Math.hypot(player.velX, player.velY);
+                if (speed > 0) {
+                    const decel = PLAYER_ACCEL * deltaTime;
+                    const newSpeed = Math.max(0, speed - decel);
+                    if (newSpeed === 0) {
+                        player.velX = player.velY = 0;
+                    } else {
+                        player.velX = (player.velX / speed) * newSpeed;
+                        player.velY = (player.velY / speed) * newSpeed;
+                    }
+                }
+            }
+
+            let newX = player.x + player.velX * deltaTime;
+            let newY = player.y + player.velY * deltaTime;
+            newX = clamp(newX, PLAYER_RADIUS, WORLD_WIDTH - PLAYER_RADIUS);
+            newY = clamp(newY, PLAYER_RADIUS, WORLD_HEIGHT - PLAYER_RADIUS);
+            if (newX === PLAYER_RADIUS || newX === WORLD_WIDTH - PLAYER_RADIUS) player.velX = 0;
+            if (newY === PLAYER_RADIUS || newY === WORLD_HEIGHT - PLAYER_RADIUS) player.velY = 0;
+            player.x = newX;
+            player.y = newY;
         }
 
-        // ---------- UPDATE LOGIC ----------
-        function updatePellets(deltaTime, now) {
-            for (let i=pellets.length-1; i>=0; i--) {
+        function updatePellets(deltaTime, nowSec) {
+            for (let i = pellets.length - 1; i >= 0; i--) {
                 const p = pellets[i];
-                p.x += p.vx*deltaTime; p.y += p.vy*deltaTime;
-                if (now - p.createdTime >= p.lifeSpan) { pellets.splice(i,1); continue; }
-                if (p.x < -500 || p.x > WORLD_WIDTH+500 || p.y < -500 || p.y > WORLD_HEIGHT+500) { pellets.splice(i,1); continue; }
+                p.x += p.vx * deltaTime;
+                p.y += p.vy * deltaTime;
+
+                if (nowSec - p.createdTime >= p.lifeSpan) {
+                    pellets.splice(i, 1);
+                    continue;
+                }
+                if (p.x < -500 || p.x > WORLD_WIDTH + 500 || p.y < -500 || p.y > WORLD_HEIGHT + 500) {
+                    pellets.splice(i, 1);
+                    continue;
+                }
+
                 let hitIndex = -1;
-                for (let j=0; j<enemies.length; j++) {
+                for (let j = 0; j < enemies.length; j++) {
                     const e = enemies[j];
-                    if (Math.hypot(p.x - e.x, p.y - e.y) < p.radius + e.radius) { hitIndex = j; break; }
+                    if (Math.hypot(p.x - e.x, p.y - e.y) < p.radius + e.radius) {
+                        hitIndex = j;
+                        break;
+                    }
                 }
                 if (hitIndex !== -1) {
                     playRandomBodyfallSound();
-                    enemies.splice(hitIndex,1);
+                    enemies.splice(hitIndex, 1);
                     score++;
                     saveHighScoreIfNeeded(score);
                     updateUI();
-                    pellets.splice(i,1);
+                    pellets.splice(i, 1);
                 }
             }
         }
 
         function updateEnemies(deltaTime, nowSec) {
-            // Движение
-            for (let i=0; i<enemies.length; i++) {
-                const e = enemies[i];
-                const dx = player.x - e.x, dy = player.y - e.y;
+            // Движение врагов
+            for (const e of enemies) {
+                const dx = player.x - e.x;
+                const dy = player.y - e.y;
                 const distance = Math.hypot(dx, dy);
                 let currentSpeed = ENEMY_BASE_SPEED;
                 if (distance < ACCELERATION_RADIUS) currentSpeed *= ENEMY_ACCEL_FACTOR;
                 if (distance > 0.01) {
-                    const move = currentSpeed*deltaTime;
-                    const stepX = (dx/distance)*move, stepY = (dy/distance)*move;
-                    e.x += stepX; e.y += stepY;
+                    const move = currentSpeed * deltaTime;
+                    const stepX = (dx / distance) * move;
+                    const stepY = (dy / distance) * move;
+                    e.x += stepX;
+                    e.y += stepY;
                 }
-                e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
-                e.y = Math.min(Math.max(e.y, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
+                e.x = clamp(e.x, ENEMY_RADIUS, WORLD_WIDTH - ENEMY_RADIUS);
+                e.y = clamp(e.y, ENEMY_RADIUS, WORLD_HEIGHT - ENEMY_RADIUS);
+
+                // Звуки (стоны) в зависимости от расстояния
                 if (distance < CAM_VIEW_HEIGHT && gameActive && audioEnabled) {
-                    const now = nowSec;
-                    if (e.lastGroanTime === 0) e.lastGroanTime = now + Math.random()*2;
-                    if (now - e.lastGroanTime >= 2 + Math.random()*2) {
+                    if (e.lastGroanTime === 0) e.lastGroanTime = nowSec + Math.random() * 2;
+                    if (nowSec - e.lastGroanTime >= 2 + Math.random() * 2) {
                         playRandomZombieSound(distance);
-                        e.lastGroanTime = now;
+                        e.lastGroanTime = nowSec;
                     }
                 }
             }
-            // Коллизии и урон
-            for (let i=0; i<enemies.length; i++) {
+
+            // Обработка столкновений с игроком и урон
+            for (let i = 0; i < enemies.length; i++) {
                 const e = enemies[i];
-                const dx = player.x - e.x, dy = player.y - e.y;
+                const dx = player.x - e.x;
+                const dy = player.y - e.y;
                 const dist = Math.hypot(dx, dy);
                 const minDist = PLAYER_RADIUS + ENEMY_RADIUS;
                 if (dist < minDist) {
@@ -529,11 +613,9 @@
                             const knockY = Math.sin(angle) * KNOCKBACK_FORCE;
                             player.velX += knockX;
                             player.velY += knockY;
-                            const spd = Math.hypot(player.velX, player.velY);
-                            if (spd > PLAYER_MAX_SPEED * 1.5) {
-                                player.velX = (player.velX / spd) * PLAYER_MAX_SPEED * 1.5;
-                                player.velY = (player.velY / spd) * PLAYER_MAX_SPEED * 1.5;
-                            }
+                            const limited = limitVelocity(player.velX, player.velY, PLAYER_MAX_SPEED * 1.5);
+                            player.velX = limited.vx;
+                            player.velY = limited.vy;
                         }
                         if (health <= 0) {
                             health = 0;
@@ -542,181 +624,295 @@
                         }
                         invincibleTimer = INVINCIBLE_DURATION;
                     }
+                    // Отталкивание врага, чтобы не застревал внутри игрока
                     if (dist < 0.001) continue;
                     const overlap = minDist - dist;
                     const angle = Math.atan2(dy, dx);
                     const pushFactor = 0.01;
-                    const pushX = Math.cos(angle)*overlap*pushFactor, pushY = Math.sin(angle)*overlap*pushFactor;
-                    e.x -= pushX; e.y -= pushY;
-                    e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
-                    e.y = Math.min(Math.max(e.y, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
+                    const pushX = Math.cos(angle) * overlap * pushFactor;
+                    const pushY = Math.sin(angle) * overlap * pushFactor;
+                    e.x -= pushX;
+                    e.y -= pushY;
+                    e.x = clamp(e.x, ENEMY_RADIUS, WORLD_WIDTH - ENEMY_RADIUS);
+                    e.y = clamp(e.y, ENEMY_RADIUS, WORLD_HEIGHT - ENEMY_RADIUS);
                 }
             }
         }
 
-        function updatePlayer(deltaTime) {
-            const { moveX, moveY } = getMovementDirection();
-            const hasInput = (moveX !== 0 || moveY !== 0);
-            if (hasInput) {
-                player.velX += moveX * PLAYER_ACCEL * deltaTime;
-                player.velY += moveY * PLAYER_ACCEL * deltaTime;
-                const speed = Math.hypot(player.velX, player.velY);
-                if (speed > PLAYER_MAX_SPEED) { player.velX = (player.velX/speed)*PLAYER_MAX_SPEED; player.velY = (player.velY/speed)*PLAYER_MAX_SPEED; }
-            } else {
-                const speed = Math.hypot(player.velX, player.velY);
-                if (speed > 0) {
-                    const decel = PLAYER_ACCEL * deltaTime;
-                    const newSpeed = Math.max(0, speed - decel);
-                    if (newSpeed === 0) { player.velX = 0; player.velY = 0; }
-                    else { player.velX = (player.velX/speed)*newSpeed; player.velY = (player.velY/speed)*newSpeed; }
-                }
+        function updateInvincibility(deltaTime) {
+            if (invincibleTimer > 0) {
+                invincibleTimer -= deltaTime;
+                if (invincibleTimer < 0) invincibleTimer = 0;
             }
-            let newX = player.x + player.velX*deltaTime, newY = player.y + player.velY*deltaTime;
-            newX = Math.min(Math.max(newX, PLAYER_RADIUS), WORLD_WIDTH - PLAYER_RADIUS);
-            newY = Math.min(Math.max(newY, PLAYER_RADIUS), WORLD_HEIGHT - PLAYER_RADIUS);
-            if (newX === PLAYER_RADIUS || newX === WORLD_WIDTH - PLAYER_RADIUS) player.velX = 0;
-            if (newY === PLAYER_RADIUS || newY === WORLD_HEIGHT - PLAYER_RADIUS) player.velY = 0;
-            player.x = newX; player.y = newY;
         }
 
-        function trySpawnEnemy(now) {
+        function trySpawnEnemy(nowSec) {
             if (!gameActive) return;
-            if (now - lastSpawnTime >= getCurrentSpawnInterval()) {
+            if (nowSec - lastSpawnTime >= getCurrentSpawnInterval()) {
                 spawnEnemy();
-                lastSpawnTime = now;
+                lastSpawnTime = nowSec;
             }
         }
-        function updateInvincibility(deltaTime) { if (invincibleTimer > 0) { invincibleTimer -= deltaTime; if (invincibleTimer < 0) invincibleTimer = 0; } }
 
-        // ---------- MOUSE + 60Hz refresh ----------
-        function refreshMousePosition() { if (mouseInsideCanvas) { const w = screenToWorld(rawMouseScreenX, rawMouseScreenY); mouseWorldX = w.x; mouseWorldY = w.y; } }
-        setInterval(() => { if (mouseInsideCanvas && gameActive) refreshMousePosition(); }, 1000/60);
-        function onMouseMove(e) {
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width/rect.width, scaleY = canvas.height/rect.height;
-            let mx = (e.clientX - rect.left)*scaleX, my = (e.clientY - rect.top)*scaleY;
-            mx = Math.min(Math.max(mx,0), CAM_VIEW_WIDTH); my = Math.min(Math.max(my,0), CAM_VIEW_HEIGHT);
-            rawMouseScreenX = mx; rawMouseScreenY = my;
-            const w = screenToWorld(mx, my); mouseWorldX = w.x; mouseWorldY = w.y;
-            mouseInsideCanvas = true;
-        }
-        function onMouseLeave() { mouseInsideCanvas = false; }
-        function handleCanvasClick(e) {
-            if (!gameActive) return;
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width/rect.width, scaleY = canvas.height/rect.height;
-            let mx = (e.clientX - rect.left)*scaleX, my = (e.clientY - rect.top)*scaleY;
-            mx = Math.min(Math.max(mx,0), CAM_VIEW_WIDTH); my = Math.min(Math.max(my,0), CAM_VIEW_HEIGHT);
-            const worldTarget = screenToWorld(mx, my);
-            const now = performance.now()/1000;
-            if (now - lastShotTime >= SHOT_COOLDOWN) { fireShotgunAt(worldTarget.x, worldTarget.y, now); lastShotTime = now; }
+        // ------ Выстрел из дробовика ------
+        function fireShotgunAt(targetX, targetY, nowSec) {
+            const dx = targetX - player.x;
+            const dy = targetY - player.y;
+            const length = Math.hypot(dx, dy);
+            if (length < 0.001) return;
+
+            const baseAngle = Math.atan2(dy, dx);
+            const pelletCount = Math.floor(Math.random() * (PELLET_COUNT_MAX - PELLET_COUNT_MIN + 1) + PELLET_COUNT_MIN);
+            for (let i = 0; i < pelletCount; i++) {
+                const spread = (Math.random() - 0.5) * 2 * SPREAD_ANGLE_RAD;
+                const angle = baseAngle + spread;
+                const vx = Math.cos(angle) * PELLET_SPEED;
+                const vy = Math.sin(angle) * PELLET_SPEED;
+                pellets.push({
+                    x: player.x, y: player.y,
+                    vx, vy,
+                    radius: PELLET_RADIUS,
+                    lifeSpan: PELLET_LIFESPAN,
+                    createdTime: nowSec
+                });
+            }
+            // Отдача
+            const recoilDirX = -dx / length;
+            const recoilDirY = -dy / length;
+            player.velX += recoilDirX * RECOIL_FORCE;
+            player.velY += recoilDirY * RECOIL_FORCE;
+            const limited = limitVelocity(player.velX, player.velY, PLAYER_MAX_SPEED);
+            player.velX = limited.vx;
+            player.velY = limited.vy;
+            playShotgunSound();
         }
 
-        // ---------- RENDERING (canvas only) ----------
-        function drawGrid() {
-            const startX = Math.floor(cameraX/GRID_STEP)*GRID_STEP;
-            const startY = Math.floor(cameraY/GRID_STEP)*GRID_STEP;
-            ctx.strokeStyle = GRID_COLOR; ctx.lineWidth = 0.8;
-            for (let x=startX; x<cameraX+CAM_VIEW_WIDTH+GRID_STEP; x+=GRID_STEP) {
+        // ===========================
+        // 7. ОТРИСОВКА (RENDER)
+        // ===========================
+        function drawBackground() {
+            ctx.fillStyle = BACKGROUND_COLOR;
+            ctx.fillRect(0, 0, CAM_VIEW_WIDTH, CAM_VIEW_HEIGHT);
+            // Сетка
+            const startX = Math.floor(cameraX / GRID_STEP) * GRID_STEP;
+            const startY = Math.floor(cameraY / GRID_STEP) * GRID_STEP;
+            ctx.strokeStyle = GRID_COLOR;
+            ctx.lineWidth = 0.8;
+            for (let x = startX; x < cameraX + CAM_VIEW_WIDTH + GRID_STEP; x += GRID_STEP) {
                 const sx = x - cameraX;
-                if (sx>=0 && sx<=CAM_VIEW_WIDTH) { ctx.beginPath(); ctx.moveTo(sx,0); ctx.lineTo(sx,CAM_VIEW_HEIGHT); ctx.stroke(); }
+                if (sx >= 0 && sx <= CAM_VIEW_WIDTH) {
+                    ctx.beginPath();
+                    ctx.moveTo(sx, 0);
+                    ctx.lineTo(sx, CAM_VIEW_HEIGHT);
+                    ctx.stroke();
+                }
             }
-            for (let y=startY; y<cameraY+CAM_VIEW_HEIGHT+GRID_STEP; y+=GRID_STEP) {
+            for (let y = startY; y < cameraY + CAM_VIEW_HEIGHT + GRID_STEP; y += GRID_STEP) {
                 const sy = y - cameraY;
-                if (sy>=0 && sy<=CAM_VIEW_HEIGHT) { ctx.beginPath(); ctx.moveTo(0,sy); ctx.lineTo(CAM_VIEW_WIDTH,sy); ctx.stroke(); }
+                if (sy >= 0 && sy <= CAM_VIEW_HEIGHT) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, sy);
+                    ctx.lineTo(CAM_VIEW_WIDTH, sy);
+                    ctx.stroke();
+                }
             }
         }
+
         function drawHealthBar() {
             if (health <= 0) return;
             const pos = worldToScreen(player.x, player.y);
-            const barX = pos.x - HEALTH_BAR_WIDTH/2, barY = pos.y + HEALTH_BAR_OFFSET_Y;
-            ctx.fillStyle = '#4a1a1a'; ctx.fillRect(barX, barY, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT);
-            const fillWidth = HEALTH_BAR_WIDTH * (health/START_HEALTH);
-            ctx.fillStyle = '#e34d4d'; ctx.fillRect(barX, barY, fillWidth, HEALTH_BAR_HEIGHT);
-            ctx.strokeStyle = '#2c2c2c'; ctx.lineWidth = 1; ctx.strokeRect(barX, barY, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT);
+            const barX = pos.x - HEALTH_BAR_WIDTH / 2;
+            const barY = pos.y + HEALTH_BAR_OFFSET_Y;
+            ctx.fillStyle = '#4a1a1a';
+            ctx.fillRect(barX, barY, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT);
+            const fillWidth = HEALTH_BAR_WIDTH * (health / START_HEALTH);
+            ctx.fillStyle = '#e34d4d';
+            ctx.fillRect(barX, barY, fillWidth, HEALTH_BAR_HEIGHT);
+            ctx.strokeStyle = '#2c2c2c';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(barX, barY, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT);
         }
+
         function drawPlayer() {
             const pos = worldToScreen(player.x, player.y);
-            const inv = (invincibleTimer > 0 && gameActive);
-            ctx.globalAlpha = (inv && (Math.floor(Date.now()/50)%3<1)) ? 0.55 : 1;
-            ctx.shadowBlur = 10; ctx.shadowColor = "#00ccff80";
-            ctx.beginPath(); ctx.arc(pos.x, pos.y, PLAYER_RADIUS, 0, Math.PI*2);
-            ctx.fillStyle = PLAYER_COLOR; ctx.fill();
-            ctx.strokeStyle = "#ffffffcc"; ctx.lineWidth=2; ctx.stroke();
-            ctx.beginPath(); ctx.arc(pos.x, pos.y, PLAYER_RADIUS-3, 0, Math.PI*2);
-            ctx.fillStyle = "#88ffff80"; ctx.fill();
+            const invincibleFlash = (invincibleTimer > 0 && gameActive);
+            if (invincibleFlash) {
+                ctx.globalAlpha = (Math.floor(Date.now() / 50) % 3 < 1) ? 0.55 : 1;
+            }
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = "#00ccff80";
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, PLAYER_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = PLAYER_COLOR;
+            ctx.fill();
+            ctx.strokeStyle = "#ffffffcc";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, PLAYER_RADIUS - 3, 0, Math.PI * 2);
+            ctx.fillStyle = "#88ffff80";
+            ctx.fill();
+            // Индикатор перезарядки (кольцо)
             if (gameActive) {
-                const now = performance.now()/1000;
+                const now = performance.now() / 1000;
                 const timeSinceLast = now - lastShotTime;
                 if (timeSinceLast < SHOT_COOLDOWN) {
-                    const progress = 1 - ((SHOT_COOLDOWN - timeSinceLast)/SHOT_COOLDOWN);
+                    const progress = 1 - ((SHOT_COOLDOWN - timeSinceLast) / SHOT_COOLDOWN);
                     const radius = PLAYER_RADIUS + 6;
-                    const start = -Math.PI/2, end = start + Math.PI*2*progress;
-                    ctx.beginPath(); ctx.arc(pos.x, pos.y, radius, start, end);
-                    ctx.lineWidth = 2.5; ctx.strokeStyle = "#FFE484"; ctx.stroke();
+                    const start = -Math.PI / 2;
+                    const end = start + Math.PI * 2 * progress;
+                    ctx.beginPath();
+                    ctx.arc(pos.x, pos.y, radius, start, end);
+                    ctx.lineWidth = 2.5;
+                    ctx.strokeStyle = "#FFE484";
+                    ctx.stroke();
                 }
             }
-            ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+            ctx.shadowBlur = 0;
+            ctx.globalAlpha = 1;
         }
+
         function drawEnemies() {
             for (const e of enemies) {
                 const pos = worldToScreen(e.x, e.y);
-                if (pos.x+ENEMY_RADIUS<0 || pos.x-ENEMY_RADIUS>CAM_VIEW_WIDTH || pos.y+ENEMY_RADIUS<0 || pos.y-ENEMY_RADIUS>CAM_VIEW_HEIGHT) continue;
-                ctx.shadowBlur = 6; ctx.shadowColor = "#2e7d32";
-                ctx.beginPath(); ctx.arc(pos.x, pos.y, ENEMY_RADIUS, 0, Math.PI*2);
-                ctx.fillStyle = ENEMY_COLOR; ctx.fill();
-                ctx.strokeStyle = "#1b5e20"; ctx.lineWidth=1.5; ctx.stroke();
+                if (pos.x + ENEMY_RADIUS < 0 || pos.x - ENEMY_RADIUS > CAM_VIEW_WIDTH ||
+                    pos.y + ENEMY_RADIUS < 0 || pos.y - ENEMY_RADIUS > CAM_VIEW_HEIGHT) continue;
+                ctx.shadowBlur = 6;
+                ctx.shadowColor = "#2e7d32";
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, ENEMY_RADIUS, 0, Math.PI * 2);
+                ctx.fillStyle = ENEMY_COLOR;
+                ctx.fill();
+                ctx.strokeStyle = "#1b5e20";
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
             }
             ctx.shadowBlur = 0;
         }
+
         function drawPellets() {
             for (const p of pellets) {
                 const pos = worldToScreen(p.x, p.y);
-                if (pos.x+PELLET_RADIUS<0 || pos.x-PELLET_RADIUS>CAM_VIEW_WIDTH || pos.y+PELLET_RADIUS<0 || pos.y-PELLET_RADIUS>CAM_VIEW_HEIGHT) continue;
-                ctx.beginPath(); ctx.arc(pos.x, pos.y, PELLET_RADIUS-1, 0, Math.PI*2);
-                ctx.fillStyle = PELLET_COLOR; ctx.fill();
-                ctx.beginPath(); ctx.arc(pos.x, pos.y, PELLET_RADIUS-2, 0, Math.PI*2);
-                ctx.fillStyle = "#FFAA33"; ctx.fill();
+                if (pos.x + PELLET_RADIUS < 0 || pos.x - PELLET_RADIUS > CAM_VIEW_WIDTH ||
+                    pos.y + PELLET_RADIUS < 0 || pos.y - PELLET_RADIUS > CAM_VIEW_HEIGHT) continue;
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, PELLET_RADIUS - 1, 0, Math.PI * 2);
+                ctx.fillStyle = PELLET_COLOR;
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, PELLET_RADIUS - 2, 0, Math.PI * 2);
+                ctx.fillStyle = "#FFAA33";
+                ctx.fill();
             }
         }
+
         function drawCrosshair() {
             if (!mouseInsideCanvas) return;
             const screenMouse = worldToScreen(mouseWorldX, mouseWorldY);
-            if (screenMouse.x<0 || screenMouse.x>CAM_VIEW_WIDTH || screenMouse.y<0 || screenMouse.y>CAM_VIEW_HEIGHT) return;
-            ctx.save(); ctx.shadowBlur = 0;
-            ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2;
+            if (screenMouse.x < 0 || screenMouse.x > CAM_VIEW_WIDTH ||
+                screenMouse.y < 0 || screenMouse.y > CAM_VIEW_HEIGHT) return;
+            ctx.save();
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = "#ffffff";
+            ctx.lineWidth = 2;
             const size = 12;
-            ctx.beginPath(); ctx.moveTo(screenMouse.x - size, screenMouse.y); ctx.lineTo(screenMouse.x - 4, screenMouse.y);
-            ctx.moveTo(screenMouse.x + 4, screenMouse.y); ctx.lineTo(screenMouse.x + size, screenMouse.y);
-            ctx.moveTo(screenMouse.x, screenMouse.y - size); ctx.lineTo(screenMouse.x, screenMouse.y - 4);
-            ctx.moveTo(screenMouse.x, screenMouse.y + 4); ctx.lineTo(screenMouse.x, screenMouse.y + size);
+            ctx.beginPath();
+            ctx.moveTo(screenMouse.x - size, screenMouse.y);
+            ctx.lineTo(screenMouse.x - 4, screenMouse.y);
+            ctx.moveTo(screenMouse.x + 4, screenMouse.y);
+            ctx.lineTo(screenMouse.x + size, screenMouse.y);
+            ctx.moveTo(screenMouse.x, screenMouse.y - size);
+            ctx.lineTo(screenMouse.x, screenMouse.y - 4);
+            ctx.moveTo(screenMouse.x, screenMouse.y + 4);
+            ctx.lineTo(screenMouse.x, screenMouse.y + size);
             ctx.stroke();
-            ctx.beginPath(); ctx.arc(screenMouse.x, screenMouse.y, 6, 0, Math.PI*2);
-            ctx.strokeStyle = "#aaffdd"; ctx.stroke();
-            ctx.beginPath(); ctx.arc(screenMouse.x, screenMouse.y, 2, 0, Math.PI*2);
-            ctx.fillStyle = "#ffcc77"; ctx.fill();
+            ctx.beginPath();
+            ctx.arc(screenMouse.x, screenMouse.y, 6, 0, Math.PI * 2);
+            ctx.strokeStyle = "#aaffdd";
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(screenMouse.x, screenMouse.y, 2, 0, Math.PI * 2);
+            ctx.fillStyle = "#ffcc77";
+            ctx.fill();
             ctx.restore();
         }
-        function drawBackground() { ctx.fillStyle = BACKGROUND_COLOR; ctx.fillRect(0,0,CAM_VIEW_WIDTH,CAM_VIEW_HEIGHT); drawGrid(); }
 
-        // ---------- MAIN LOOP ----------
-        let lastTimestamp = 0;
-        function gameLoop(nowMs) {
-            const nowSec = nowMs/1000;
-            if (lastTimestamp===0) { lastTimestamp=nowSec; lastSpawnTime=nowSec; lastShotTime=nowSec; requestAnimationFrame(gameLoop); return; }
-            let dt = Math.min(0.033, nowSec - lastTimestamp);
-            if (dt<=0) { lastTimestamp=nowSec; requestAnimationFrame(gameLoop); return; }
-            if (gameActive) {
-                gameTimeElapsed += dt;
-                updatePlayer(dt); updateCamera(); updateEnemies(dt, nowSec); updatePellets(dt, nowSec);
-                updateInvincibility(dt); trySpawnEnemy(nowSec);
-            } else { updateCamera(); }
-            drawBackground(); drawPellets(); drawEnemies(); drawPlayer(); drawHealthBar(); drawCrosshair();
-            lastTimestamp = nowSec;
-            requestAnimationFrame(gameLoop);
+        // ===========================
+        // 8. ВВОД И ОБРАБОТЧИКИ
+        // ===========================
+        const keyState = {
+            KeyW: false, KeyA: false, KeyS: false, KeyD: false,
+            ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false
+        };
+
+        function handleKeyDown(e) {
+            const code = e.code;
+            if (keyState.hasOwnProperty(code)) {
+                keyState[code] = true;
+                e.preventDefault();
+            }
+            if (code === 'ArrowUp' || code === 'ArrowDown' || code === 'ArrowLeft' || code === 'ArrowRight') {
+                e.preventDefault();
+            }
+        }
+        function handleKeyUp(e) {
+            const code = e.code;
+            if (keyState.hasOwnProperty(code)) {
+                keyState[code] = false;
+                e.preventDefault();
+            }
         }
 
-        // ---------- RESTART GAME ----------
+        function onMouseMove(e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            let mx = (e.clientX - rect.left) * scaleX;
+            let my = (e.clientY - rect.top) * scaleY;
+            mx = clamp(mx, 0, CAM_VIEW_WIDTH);
+            my = clamp(my, 0, CAM_VIEW_HEIGHT);
+            rawMouseScreenX = mx;
+            rawMouseScreenY = my;
+            const worldPos = screenToWorld(mx, my);
+            mouseWorldX = worldPos.x;
+            mouseWorldY = worldPos.y;
+            mouseInsideCanvas = true;
+        }
+        function onMouseLeave() { mouseInsideCanvas = false; }
+
+        function handleCanvasClick(e) {
+            if (!gameActive) return;
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            let mx = (e.clientX - rect.left) * scaleX;
+            let my = (e.clientY - rect.top) * scaleY;
+            mx = clamp(mx, 0, CAM_VIEW_WIDTH);
+            my = clamp(my, 0, CAM_VIEW_HEIGHT);
+            const worldTarget = screenToWorld(mx, my);
+            const nowSec = performance.now() / 1000;
+            if (nowSec - lastShotTime >= SHOT_COOLDOWN) {
+                fireShotgunAt(worldTarget.x, worldTarget.y, nowSec);
+                lastShotTime = nowSec;
+            }
+        }
+
+        function firstInteraction() {
+            enableAudio();
+        }
+
+        // Обновление позиции прицела 60 раз в секунду (мышь за пределами canvas)
+        setInterval(() => {
+            if (mouseInsideCanvas && gameActive) {
+                const worldPos = screenToWorld(rawMouseScreenX, rawMouseScreenY);
+                mouseWorldX = worldPos.x;
+                mouseWorldY = worldPos.y;
+            }
+        }, 1000 / 60);
+
+        // ===========================
+        // 9. РЕСТАРТ ИГРЫ
+        // ===========================
         function restartGame() {
             gameActive = true;
             health = START_HEALTH;
@@ -725,42 +921,84 @@
             pellets = [];
             invincibleTimer = 0;
             gameTimeElapsed = 0;
-            player.x = WORLD_WIDTH/2;
-            player.y = WORLD_HEIGHT/2;
-            player.velX = 0; player.velY = 0;
-            const nowPerf = performance.now()/1000;
-            lastSpawnTime = nowPerf;
-            lastShotTime = nowPerf;
-            for (let i=0; i<3; i++) spawnEnemy();
+            player.x = WORLD_WIDTH / 2;
+            player.y = WORLD_HEIGHT / 2;
+            player.velX = 0;
+            player.velY = 0;
+            const nowSec = performance.now() / 1000;
+            lastSpawnTime = nowSec;
+            lastShotTime = nowSec;
+            // Стартовые враги (3 штуки)
+            for (let i = 0; i < 3; i++) spawnEnemy();
             updateCamera();
-            mouseWorldX = player.x; mouseWorldY = player.y;
+            mouseWorldX = player.x;
+            mouseWorldY = player.y;
             updateUI();
             hideGameOverUI();
-            if (audioEnabled) {
-                restartBackgroundMusic();
-            }
+            restartBackgroundMusic();
         }
 
-        // ---------- EVENT LISTENERS ----------
-        function handleKeyDown(e) { const c=e.code; if(keyState.hasOwnProperty(c)) { keyState[c]=true; e.preventDefault(); } if(c==='ArrowUp'||c==='ArrowDown'||c==='ArrowLeft'||c==='ArrowRight') e.preventDefault(); }
-        function handleKeyUp(e) { const c=e.code; if(keyState.hasOwnProperty(c)) { keyState[c]=false; e.preventDefault(); } }
-        function firstInteraction() { enableAudio(); }
+        // ===========================
+        // 10. ГЛАВНЫЙ ЦИКЛ
+        // ===========================
+        let lastTimestamp = 0;
+        function gameLoop(nowMs) {
+            const nowSec = nowMs / 1000;
+            if (lastTimestamp === 0) {
+                lastTimestamp = nowSec;
+                lastSpawnTime = nowSec;
+                lastShotTime = nowSec;
+                requestAnimationFrame(gameLoop);
+                return;
+            }
+            let dt = Math.min(0.033, nowSec - lastTimestamp);
+            if (dt <= 0) {
+                lastTimestamp = nowSec;
+                requestAnimationFrame(gameLoop);
+                return;
+            }
+            if (gameActive) {
+                gameTimeElapsed += dt;
+                updatePlayer(dt);
+                updateCamera();
+                updateEnemies(dt, nowSec);
+                updatePellets(dt, nowSec);
+                updateInvincibility(dt);
+                trySpawnEnemy(nowSec);
+            } else {
+                updateCamera(); // камера всё ещё следит за местом смерти
+            }
+            // Рендер
+            drawBackground();
+            drawPellets();
+            drawEnemies();
+            drawPlayer();
+            drawHealthBar();
+            drawCrosshair();
+            lastTimestamp = nowSec;
+            requestAnimationFrame(gameLoop);
+        }
 
-        canvas.addEventListener('click', (e) => { firstInteraction(); handleCanvasClick(e); });
-        canvas.addEventListener('mousemove', onMouseMove);
-        canvas.addEventListener('mouseleave', onMouseLeave);
-        canvas.addEventListener('keydown', handleKeyDown);
-        canvas.addEventListener('keyup', handleKeyUp);
-        window.addEventListener('keydown', handleKeyDown);
-        window.addEventListener('keyup', handleKeyUp);
-        restartBtn.addEventListener('click', () => { restartGame(); });
-
-        loadHighScore();
-        updateUI();
-        function initGame() { restartGame(); }
-
-        window.addEventListener('load', () => { initGame(); requestAnimationFrame(gameLoop); });
-        canvas.focus();
+        // ===========================
+        // 11. ИНИЦИАЛИЗАЦИЯ
+        // ===========================
+        function init() {
+            loadHighScore();
+            updateUI();
+            restartGame();
+            // События
+            canvas.addEventListener('click', (e) => { firstInteraction(); handleCanvasClick(e); });
+            canvas.addEventListener('mousemove', onMouseMove);
+            canvas.addEventListener('mouseleave', onMouseLeave);
+            canvas.addEventListener('keydown', handleKeyDown);
+            canvas.addEventListener('keyup', handleKeyUp);
+            window.addEventListener('keydown', handleKeyDown);
+            window.addEventListener('keyup', handleKeyUp);
+            restartBtn.addEventListener('click', () => restartGame());
+            canvas.focus();
+            requestAnimationFrame(gameLoop);
+        }
+        init();
     })();
 </script>
 </body>
