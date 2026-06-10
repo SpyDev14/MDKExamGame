@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Vampire Survivors-like | Shotgun Arena | Recoil + Inertia</title>
+    <title>Vampire Survivors-like | Shotgun Arena | High Score + Recoil</title>
     <style>
         * {
             margin: 0;
@@ -63,7 +63,7 @@
     <canvas id="gameCanvas" width="1000" height="700" tabindex="0"></canvas>
 </div>
 <div class="controls-hint">
-    🎯 WASD / arrows = move | 🖱️ Left click = shotgun blast | 🔫 Aim with crosshair | 💥 Recoil knockback
+    🎯 WASD / arrows = move | 🖱️ Left click = shotgun blast | 🔫 Aim with crosshair | 💥 Recoil
 </div>
 
 <script>
@@ -72,13 +72,34 @@
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
-        // ========== AUDIO CONTEXT & SOUNDS ==========
+        // ---------- HIGH SCORE (localStorage) ----------
+        let highScore = 0;
+        const HIGHSCORE_KEY = 'shotgun_highscore';
+
+        function loadHighScore() {
+            try {
+                const saved = localStorage.getItem(HIGHSCORE_KEY);
+                if (saved !== null) {
+                    highScore = parseInt(saved, 10) || 0;
+                }
+            } catch(e) { console.warn("localStorage error", e); }
+        }
+
+        function saveHighScoreIfNeeded(currentScore) {
+            if (currentScore > highScore) {
+                highScore = currentScore;
+                try {
+                    localStorage.setItem(HIGHSCORE_KEY, highScore);
+                } catch(e) { console.warn("save failed", e); }
+            }
+        }
+
+        // ---------- AUDIO CONTEXT & SOUNDS ----------
         let audioContext = null;
         let shotgunBuffer = null;
         let zombieSounds = [];
         let isAudioEnabled = false;
 
-        // Zombie sound URLs (raw GitHub)
         const ZOMBIE_SOUND_URLS = [
             "https://raw.githubusercontent.com/space-wizards/space-station-14/master/Resources/Audio/Voice/Zombie/zombie-1.ogg",
             "https://raw.githubusercontent.com/space-wizards/space-station-14/master/Resources/Audio/Voice/Zombie/zombie-2.ogg",
@@ -91,7 +112,6 @@
             if (audioContext) return;
             try {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                // Load shotgun
                 const shotgunResp = await fetch(SHOTGUN_URL);
                 if (shotgunResp.ok) {
                     const arrayBuffer = await shotgunResp.arrayBuffer();
@@ -99,7 +119,6 @@
                 } else {
                     console.warn("Shotgun sound not available, using procedural");
                 }
-                // Load zombie sounds
                 for (let url of ZOMBIE_SOUND_URLS) {
                     try {
                         const resp = await fetch(url);
@@ -139,7 +158,6 @@
                 source.connect(audioContext.destination);
                 source.start();
             } else {
-                // fallback procedural
                 const now = audioContext.currentTime;
                 const masterGain = audioContext.createGain();
                 masterGain.gain.setValueAtTime(0.45, now);
@@ -176,21 +194,17 @@
             }
         }
 
-        // Play zombie sound with volume based on distance (3D falloff)
         function playRandomZombieSound(distance) {
             if (!audioContext || !isAudioEnabled) return;
             if (zombieSounds.length === 0) return;
-
-            // Volume calculation:
-            const minDistance = 2 * PLAYER_RADIUS;   // 32 px
-            const maxDistance = CAM_VIEW_HEIGHT / 2; // 350 px
+            const minDistance = 2 * PLAYER_RADIUS;
+            const maxDistance = CAM_VIEW_HEIGHT / 2;
             let volume = 0;
             if (distance <= minDistance) volume = 1.35;
             else if (distance >= maxDistance) volume = 0;
             else volume = 1.35 * (1 - (distance - minDistance) / (maxDistance - minDistance));
             volume = Math.min(1.35, Math.max(0, volume));
             if (volume <= 0.01) return;
-
             const play = () => {
                 const source = audioContext.createBufferSource();
                 const gainNode = audioContext.createGain();
@@ -201,7 +215,6 @@
                 gainNode.gain.value = volume;
                 source.start();
             };
-
             if (audioContext.state === 'suspended') {
                 audioContext.resume().then(play).catch(e=>console.log);
             } else {
@@ -222,12 +235,11 @@
         const GRID_STEP = 60;
         const PLAYER_RADIUS = 16;
         const PLAYER_COLOR = '#2ad4ff';
-        const PLAYER_MAX_SPEED = 340;          // max speed px/sec
-        const PLAYER_ACCEL_TIME = 0.25;         // seconds to reach full speed (changed from 0.6)
-        const PLAYER_ACCEL = PLAYER_MAX_SPEED / PLAYER_ACCEL_TIME; // 1360 px/s^2
-        const RECOIL_FORCE = 280;               // impulse added to player velocity opposite to shot direction
+        const PLAYER_MAX_SPEED = 340;
+        const PLAYER_ACCEL_TIME = 0.25;
+        const PLAYER_ACCEL = PLAYER_MAX_SPEED / PLAYER_ACCEL_TIME;
+        const RECOIL_FORCE = 280;
 
-        // Health bar (raised: -34 px above player)
         const HEALTH_BAR_WIDTH = 40;
         const HEALTH_BAR_HEIGHT = 7;
         const HEALTH_BAR_OFFSET_Y = -34;
@@ -246,7 +258,7 @@
         const ENEMY_RADIUS = 13;
         const ENEMY_COLOR = '#4CAF50';
         const ENEMY_BASE_SPEED = 90;
-        const ACCELERATION_RADIUS = 9 * PLAYER_RADIUS; // 144 px
+        const ACCELERATION_RADIUS = 9 * PLAYER_RADIUS;
         const ENEMY_ACCEL_FACTOR = 2.0;
         const ENEMY_HP = 1;
 
@@ -278,7 +290,7 @@
         let mouseInsideCanvas = false;
         let rawMouseScreenX = 0, rawMouseScreenY = 0;
 
-        // ---------- INPUT: WASD + ARROWS (layout independent via .code) ----------
+        // ---------- INPUT: WASD + ARROWS (layout independent) ----------
         const keyState = {
             KeyW: false, KeyA: false, KeyS: false, KeyD: false,
             ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false
@@ -370,12 +382,11 @@
                     createdTime: now
                 });
             }
-            // Apply recoil: opposite direction of shot
+            // Apply recoil (opposite direction)
             const recoilDirX = -dx / length;
             const recoilDirY = -dy / length;
             player.velX += recoilDirX * RECOIL_FORCE;
             player.velY += recoilDirY * RECOIL_FORCE;
-            // Clamp maximum speed after recoil (respect max speed)
             const speed = Math.hypot(player.velX, player.velY);
             if (speed > PLAYER_MAX_SPEED) {
                 player.velX = (player.velX / speed) * PLAYER_MAX_SPEED;
@@ -411,6 +422,8 @@
                 if (hitIndex !== -1) {
                     enemies.splice(hitIndex, 1);
                     score++;
+                    // Update high score after each kill
+                    saveHighScoreIfNeeded(score);
                     pellets.splice(i,1);
                 }
             }
@@ -436,7 +449,6 @@
                 e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
                 e.y = Math.min(Math.max(e.y, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
 
-                // Zombie sound with distance-based volume (only if within audible range)
                 const audible = distance < CAM_VIEW_HEIGHT / 2;
                 if (audible && gameActive && isAudioEnabled && zombieSounds.length > 0) {
                     const now = nowSec;
@@ -452,7 +464,6 @@
                 }
             }
 
-            // Collision and damage (sliding reduced 100x)
             for (let i = 0; i < enemies.length; i++) {
                 const e = enemies[i];
                 const dx = player.x - e.x;
@@ -485,7 +496,6 @@
         function updatePlayer(deltaTime) {
             const { moveX, moveY } = getMovementDirection();
             const hasInput = (moveX !== 0 || moveY !== 0);
-
             if (hasInput) {
                 player.velX += moveX * PLAYER_ACCEL * deltaTime;
                 player.velY += moveY * PLAYER_ACCEL * deltaTime;
@@ -508,15 +518,12 @@
                     }
                 }
             }
-
             let newX = player.x + player.velX * deltaTime;
             let newY = player.y + player.velY * deltaTime;
             newX = Math.min(Math.max(newX, PLAYER_RADIUS), WORLD_WIDTH - PLAYER_RADIUS);
             newY = Math.min(Math.max(newY, PLAYER_RADIUS), WORLD_HEIGHT - PLAYER_RADIUS);
-
             if (newX === PLAYER_RADIUS || newX === WORLD_WIDTH - PLAYER_RADIUS) player.velX = 0;
             if (newY === PLAYER_RADIUS || newY === WORLD_HEIGHT - PLAYER_RADIUS) player.velY = 0;
-
             player.x = newX;
             player.y = newY;
         }
@@ -738,13 +745,19 @@
         }
 
         function drawUI() {
+            // Current score (top right)
             ctx.font = "bold 26 'Courier New', monospace";
             ctx.shadowBlur = 0;
             ctx.fillStyle = "#f3d382";
             ctx.fillText(`🎯 ${score}`, CAM_VIEW_WIDTH - 135, 52);
+            // High score (below current score)
+            ctx.font = "bold 20 'Courier New', monospace";
+            ctx.fillStyle = "#e0b86e";
+            ctx.fillText(`🏆 BEST: ${highScore}`, CAM_VIEW_WIDTH - 155, 92);
+            // Shotgun hint
             ctx.font = "bold 18 monospace";
             ctx.fillStyle = "#afd5ff";
-            ctx.fillText("⚡ CLICK TO SHOOT", CAM_VIEW_WIDTH - 220, 100);
+            ctx.fillText("⚡ CLICK TO SHOOT", CAM_VIEW_WIDTH - 220, 130);
         }
 
         function drawGameOver() {
@@ -758,9 +771,12 @@
             ctx.font = "28 monospace";
             ctx.fillStyle = "#ddbb77";
             ctx.fillText(`FINAL SCORE: ${score}`, CAM_VIEW_WIDTH/2 - 130, CAM_VIEW_HEIGHT/2 + 40);
+            ctx.font = "20 monospace";
+            ctx.fillStyle = "#ffbb77";
+            ctx.fillText(`BEST: ${highScore}`, CAM_VIEW_WIDTH/2 - 70, CAM_VIEW_HEIGHT/2 + 90);
             ctx.font = "16 monospace";
             ctx.fillStyle = "#aaaaaa";
-            ctx.fillText("press F5 or refresh to restart", CAM_VIEW_WIDTH/2 - 150, CAM_VIEW_HEIGHT/2 + 110);
+            ctx.fillText("press F5 or refresh to restart", CAM_VIEW_WIDTH/2 - 150, CAM_VIEW_HEIGHT/2 + 130);
         }
 
         function drawBackground() {
@@ -812,7 +828,7 @@
             requestAnimationFrame(gameLoop);
         }
 
-        // ---------- KEYBOARD HANDLERS (using .code for layout independence) ----------
+        // ---------- KEYBOARD HANDLERS ----------
         function handleKeyDown(e) {
             const code = e.code;
             if (keyState.hasOwnProperty(code)) {
@@ -867,7 +883,11 @@
             updateCamera();
             mouseWorldX = player.x;
             mouseWorldY = player.y;
+            // High score already loaded
         }
+
+        // Load high score from storage before starting
+        loadHighScore();
 
         window.addEventListener('load', () => {
             initAudio().catch(e=>console.log);
