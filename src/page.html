@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-	<title>Vampire Survivors-like | Shotgun Arena | Camera Follow</title>
+	<title>Vampire Survivors-like | Shotgun Arena | With Sound</title>
 	<style>
 		* {
 			margin: 0;
@@ -40,18 +40,147 @@
 		canvas:focus {
 			outline: none;
 		}
+
+		/* subtle start hint for audio */
+		.audio-hint {
+			position: fixed;
+			bottom: 15px;
+			left: 15px;
+			color: #7e8c8f;
+			font-family: monospace;
+			font-size: 13px;
+			background: rgba(0,0,0,0.6);
+			padding: 5px 12px;
+			border-radius: 20px;
+			pointer-events: none;
+			z-index: 100;
+			backdrop-filter: blur(4px);
+		}
 	</style>
 </head>
 <body>
 <div class="game-container">
 	<canvas id="gameCanvas" width="1000" height="700" tabindex="0"></canvas>
 </div>
+<div class="audio-hint">🔊 Audio ready — click canvas to enable sound if needed</div>
 
 <script>
 	(function() {
 		// ---------- CANVAS ----------
 		const canvas = document.getElementById('gameCanvas');
 		const ctx = canvas.getContext('2d');
+
+		// ========== AUDIO SYSTEM (shotgun) ==========
+		let audioContext = null;
+		let shotgunBuffer = null;
+		let isAudioEnabled = false;
+
+		// Preload the shotgun sound from the provided GitHub URL (raw OGG)
+		const SHOTGUN_SOUND_URL = "https://github.com/space-wizards/space-station-14/blob/master/Resources/Audio/Weapons/Guns/Gunshots/shotgun.ogg";
+		// We need to fetch the actual raw audio. GitHub blob page is HTML, but raw.githubusercontent.com may work.
+		// Use raw.githubusercontent.com for direct file access (common pattern for GH audio assets)
+		const RAW_AUDIO_URL = "https://raw.githubusercontent.com/space-wizards/space-station-14/master/Resources/Audio/Weapons/Guns/Gunshots/shotgun.ogg";
+
+		async function initAudio() {
+			if (audioContext) return;
+			try {
+				audioContext = new (window.AudioContext || window.webkitAudioContext)();
+				// Fetch the audio file
+				const response = await fetch(RAW_AUDIO_URL);
+				if (!response.ok) {
+					throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+				}
+				const arrayBuffer = await response.arrayBuffer();
+				shotgunBuffer = await audioContext.decodeAudioData(arrayBuffer);
+				isAudioEnabled = true;
+				console.log("Shotgun sound loaded successfully");
+			} catch (err) {
+				console.warn("Could not load shotgun sound from GitHub raw URL. Fallback: no sound.", err);
+				// Fallback: generate a procedural shotgun sound using Web Audio (simple noise burst)
+				// This ensures the game always has audio feedback even if network fetch fails.
+				createProceduralShotgunSound();
+				isAudioEnabled = true; // procedural sound is available
+			}
+		}
+
+		// Fallback: create a synthetic shotgun blast using Web Audio oscillator + noise
+		function createProceduralShotgunSound() {
+			if (!audioContext) return;
+			// We store a function that generates a short burst of filtered noise.
+			// Instead of a buffer, we'll define a function that plays a procedural sound.
+			shotgunBuffer = null; // indicate we're using procedural mode
+		}
+
+		function playShotgunSound() {
+			if (!audioContext || !isAudioEnabled) return;
+			// Resume context if suspended (browser autoplay policy)
+			if (audioContext.state === 'suspended') {
+				audioContext.resume().then(() => {
+					playSoundInternal();
+				}).catch(e => console.log("Audio resume failed", e));
+			} else {
+				playSoundInternal();
+			}
+		}
+
+		function playSoundInternal() {
+			if (!audioContext || !isAudioEnabled) return;
+			if (shotgunBuffer) {
+				// Buffer-based playback
+				const source = audioContext.createBufferSource();
+				source.buffer = shotgunBuffer;
+				source.connect(audioContext.destination);
+				source.start();
+			} else {
+				// Procedural fallback: generate a distinctive shotgun-like whoosh + blast
+				const now = audioContext.currentTime;
+				const masterGain = audioContext.createGain();
+				masterGain.gain.setValueAtTime(0.6, now);
+				masterGain.connect(audioContext.destination);
+
+				// Noise burst (low-pass filtered)
+				const bufferSize = 4096;
+				const noiseNode = audioContext.createScriptProcessor(bufferSize, 1, 1);
+				noiseNode.onaudioprocess = function(e) {
+					const output = e.outputBuffer.getChannelData(0);
+					for (let i = 0; i < bufferSize; i++) {
+						output[i] = (Math.random() * 2 - 1) * 0.8;
+					}
+				};
+				const filter = audioContext.createBiquadFilter();
+				filter.type = "lowpass";
+				filter.frequency.value = 800;
+				filter.Q.value = 5;
+				noiseNode.connect(filter);
+				filter.connect(masterGain);
+
+				// Envelope: short burst
+				masterGain.gain.setValueAtTime(0.7, now);
+				masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
+
+				noiseNode.start();
+				noiseNode.stop(now + 0.3);
+				// Also add a slight low-frequency thump
+				const osc = audioContext.createOscillator();
+				osc.type = "sine";
+				osc.frequency.value = 90;
+				const thumpGain = audioContext.createGain();
+				thumpGain.gain.setValueAtTime(0.5, now);
+				thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+				osc.connect(thumpGain);
+				thumpGain.connect(masterGain);
+				osc.start();
+				osc.stop(now + 0.15);
+
+				// auto clean
+				setTimeout(() => {
+					try {
+						noiseNode.disconnect();
+						masterGain.disconnect();
+					} catch(e) {}
+				}, 400);
+			}
+		}
 
 		// ---------- WORLD & CAMERA ----------
 		const WORLD_WIDTH = 4000;
@@ -65,19 +194,16 @@
 		// ---------- GAME CONSTANTS ----------
 		const BACKGROUND_COLOR = '#151e27';
 		const GRID_COLOR = '#253644';
-		const GRID_STEP = 60;      // grid spacing in world units
+		const GRID_STEP = 60;
 
-		// Player settings
 		const PLAYER_RADIUS = 16;
 		const PLAYER_COLOR = '#2ad4ff';
-		const PLAYER_SPEED = 340;          // pixels per second
+		const PLAYER_SPEED = 340;
 
-		// Health bar (above player, world space)
 		const HEALTH_BAR_WIDTH = 40;
 		const HEALTH_BAR_HEIGHT = 7;
-		const HEALTH_BAR_OFFSET_Y = -22;    // above player center (world offset)
+		const HEALTH_BAR_OFFSET_Y = -22;
 
-		// Shotgun
 		const SHOT_COOLDOWN = 0.8;
 		const PELLET_COUNT_MIN = 5;
 		const PELLET_COUNT_MAX = 8;
@@ -88,30 +214,25 @@
 		const SPREAD_ANGLE_DEG = 25;
 		const SPREAD_ANGLE_RAD = SPREAD_ANGLE_DEG * Math.PI / 180;
 
-		// Enemy settings
 		const ENEMY_RADIUS = 13;
 		const ENEMY_COLOR = '#D64545';
 		const ENEMY_SPEED = 128;
 		const ENEMY_HP = 1;
 
-		// Spawn difficulty
 		const SPAWN_INTERVAL_START = 1.25;
 		const SPAWN_INTERVAL_MIN = 0.32;
 		const SPAWN_INTERVAL_DECAY_RATE = 0.021;
 
-		// Health & invincibility
 		const START_HEALTH = 5;
 		const INVINCIBLE_DURATION = 0.5;
 
-		// Enemy spawn distance from camera view (in world units)
-		const SPAWN_EXTRA_RADIUS = 250;   // enemies appear outside visible area + this margin
+		const SPAWN_EXTRA_RADIUS = 250;
 
 		// ---------- GLOBAL STATE ----------
 		let gameActive = true;
 		let health = START_HEALTH;
 		let score = 0;
 
-		// Player position (world)
 		let player = {
 			x: WORLD_WIDTH / 2,
 			y: WORLD_HEIGHT / 2,
@@ -126,7 +247,6 @@
 		let invincibleTimer = 0;
 		let gameTimeElapsed = 0;
 
-		// Input handling
 		const keys = {
 			ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false,
 			w: false, s: false, a: false, d: false
@@ -139,60 +259,47 @@
 			return interval;
 		}
 
-		// Update camera to follow player (center of screen)
 		function updateCamera() {
-			// Target camera position (top-left) to center player
 			let targetX = player.x - CAM_VIEW_WIDTH / 2;
 			let targetY = player.y - CAM_VIEW_HEIGHT / 2;
-			// Clamp to world bounds
 			targetX = Math.min(Math.max(targetX, 0), WORLD_WIDTH - CAM_VIEW_WIDTH);
 			targetY = Math.min(Math.max(targetY, 0), WORLD_HEIGHT - CAM_VIEW_HEIGHT);
 			cameraX = targetX;
 			cameraY = targetY;
 		}
 
-		// Convert world coordinates to screen coordinates
 		function worldToScreen(worldX, worldY) {
 			return { x: worldX - cameraX, y: worldY - cameraY };
 		}
 
-		// Spawn enemy outside the current camera view (but within world bounds)
 		function spawnEnemy() {
-			// Determine visible rectangle in world coordinates (with margin)
 			const viewLeft = cameraX;
 			const viewRight = cameraX + CAM_VIEW_WIDTH;
 			const viewTop = cameraY;
 			const viewBottom = cameraY + CAM_VIEW_HEIGHT;
 
-			// Expand spawn region outside the view
 			let spawnX, spawnY;
-			const side = Math.floor(Math.random() * 4); // 0:left,1:right,2:top,3:bottom
+			const side = Math.floor(Math.random() * 4);
 			const margin = SPAWN_EXTRA_RADIUS;
 
-			if (side === 0) { // left of view
+			if (side === 0) {
 				spawnX = viewLeft - margin - Math.random() * (margin * 0.8);
 				spawnY = viewTop + Math.random() * CAM_VIEW_HEIGHT;
-			} else if (side === 1) { // right of view
+			} else if (side === 1) {
 				spawnX = viewRight + margin + Math.random() * (margin * 0.8);
 				spawnY = viewTop + Math.random() * CAM_VIEW_HEIGHT;
-			} else if (side === 2) { // top
+			} else if (side === 2) {
 				spawnX = viewLeft + Math.random() * CAM_VIEW_WIDTH;
 				spawnY = viewTop - margin - Math.random() * (margin * 0.8);
-			} else { // bottom
+			} else {
 				spawnX = viewLeft + Math.random() * CAM_VIEW_WIDTH;
 				spawnY = viewBottom + margin + Math.random() * (margin * 0.8);
 			}
 
-			// Clamp to world boundaries (with enemy radius padding)
 			spawnX = Math.min(Math.max(spawnX, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
 			spawnY = Math.min(Math.max(spawnY, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
 
-			enemies.push({
-				x: spawnX,
-				y: spawnY,
-				radius: ENEMY_RADIUS,
-				hp: ENEMY_HP
-			});
+			enemies.push({ x: spawnX, y: spawnY, radius: ENEMY_RADIUS, hp: ENEMY_HP });
 		}
 
 		function findNearestEnemy() {
@@ -216,6 +323,10 @@
 		function fireShotgun(now) {
 			const nearest = findNearestEnemy();
 			if (!nearest) return;
+
+			// Play shotgun sound!
+			playShotgunSound();
+
 			const angleToEnemy = Math.atan2(nearest.enemy.y - player.y, nearest.enemy.x - player.x);
 			const pelletCount = Math.floor(Math.random() * (PELLET_COUNT_MAX - PELLET_COUNT_MIN + 1) + PELLET_COUNT_MIN);
 			for (let i = 0; i < pelletCount; i++) {
@@ -241,7 +352,6 @@
 					pellets.splice(i,1);
 					continue;
 				}
-				// Remove if outside world (optional, but prevents infinite travel)
 				if (p.x < -500 || p.x > WORLD_WIDTH+500 || p.y < -500 || p.y > WORLD_HEIGHT+500) {
 					pellets.splice(i,1);
 					continue;
@@ -277,12 +387,10 @@
 					e.x += stepX;
 					e.y += stepY;
 				}
-				// Keep enemy inside world boundaries
 				e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
 				e.y = Math.min(Math.max(e.y, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
 			}
 
-			// Player-enemy collision and damage
 			for (let i = 0; i < enemies.length; i++) {
 				const e = enemies[i];
 				const dx = player.x - e.x;
@@ -298,7 +406,6 @@
 						}
 						invincibleTimer = INVINCIBLE_DURATION;
 					}
-					// push enemy away
 					if (dist < 0.001) continue;
 					const overlap = minDist - dist;
 					const angle = Math.atan2(dy, dx);
@@ -306,7 +413,6 @@
 					const pushY = Math.sin(angle) * overlap;
 					e.x -= pushX;
 					e.y -= pushY;
-					// re-clamp after push
 					e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
 					e.y = Math.min(Math.max(e.y, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
 				}
@@ -326,7 +432,6 @@
 			}
 			let newX = player.x + moveX * PLAYER_SPEED * deltaTime;
 			let newY = player.y + moveY * PLAYER_SPEED * deltaTime;
-			// World boundaries
 			newX = Math.min(Math.max(newX, PLAYER_RADIUS), WORLD_WIDTH - PLAYER_RADIUS);
 			newY = Math.min(Math.max(newY, PLAYER_RADIUS), WORLD_HEIGHT - PLAYER_RADIUS);
 			player.x = newX;
@@ -357,9 +462,8 @@
 			}
 		}
 
-		// ---------- RENDERING (with camera transformation) ----------
+		// ---------- RENDERING ----------
 		function drawGrid() {
-			// Calculate visible grid range
 			const startX = Math.floor(cameraX / GRID_STEP) * GRID_STEP;
 			const startY = Math.floor(cameraY / GRID_STEP) * GRID_STEP;
 			ctx.strokeStyle = GRID_COLOR;
@@ -389,7 +493,6 @@
 			const screenPos = worldToScreen(player.x, player.y);
 			const barX = screenPos.x - HEALTH_BAR_WIDTH / 2;
 			const barY = screenPos.y + HEALTH_BAR_OFFSET_Y;
-			// background
 			ctx.fillStyle = '#4a1a1a';
 			ctx.fillRect(barX, barY, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT);
 			const healthPercent = health / START_HEALTH;
@@ -423,7 +526,6 @@
 			ctx.fillStyle = "#88ffff80";
 			ctx.fill();
 
-			// Reload indicator
 			if (gameActive && enemies.length > 0) {
 				const now = performance.now() / 1000;
 				const timeSinceLastShot = now - lastShotTime;
@@ -448,7 +550,6 @@
 		function drawEnemies() {
 			for (const e of enemies) {
 				const screenPos = worldToScreen(e.x, e.y);
-				// Skip if outside visible area + margin (optimization)
 				if (screenPos.x + ENEMY_RADIUS < 0 || screenPos.x - ENEMY_RADIUS > CAM_VIEW_WIDTH ||
 					screenPos.y + ENEMY_RADIUS < 0 || screenPos.y - ENEMY_RADIUS > CAM_VIEW_HEIGHT) {
 					continue;
@@ -462,7 +563,6 @@
 				ctx.strokeStyle = "#ff8080";
 				ctx.lineWidth = 1.5;
 				ctx.stroke();
-				// eyes
 				ctx.beginPath();
 				ctx.arc(screenPos.x-4, screenPos.y-3, 3, 0, Math.PI*2);
 				ctx.fillStyle = "#ffffff";
@@ -500,7 +600,6 @@
 		}
 
 		function drawUI() {
-			// Score is screen-fixed
 			ctx.font = "bold 26 'Courier New', monospace";
 			ctx.shadowBlur = 0;
 			ctx.fillStyle = "#f3d382";
@@ -532,7 +631,7 @@
 			drawGrid();
 		}
 
-		// ---------- MAIN GAME LOOP ----------
+		// ---------- GAME LOOP ----------
 		let lastTimestamp = 0;
 
 		function gameLoop(nowMs) {
@@ -558,14 +657,13 @@
 
 			if (gameActive) {
 				updatePlayer(deltaTime);
-				updateCamera();          // camera follows player
+				updateCamera();
 				updateEnemies(deltaTime);
 				updatePellets(deltaTime, nowSec);
 				updateInvincibility(deltaTime);
 				trySpawnEnemy(nowSec);
 				tryAutoShoot(nowSec);
 			} else {
-				// still update camera to show player position after death
 				updateCamera();
 			}
 
@@ -621,16 +719,32 @@
 			const nowPerf = performance.now() / 1000;
 			lastSpawnTime = nowPerf;
 			lastShotTime = nowPerf;
-			// initial spawn of a few enemies
 			for (let i = 0; i < 3; i++) {
 				spawnEnemy();
 			}
 			updateCamera();
 		}
 
+		// Enable audio on first user interaction (click/tap on canvas)
+		function enableAudioOnFirstClick() {
+			if (!audioContext) {
+				initAudio().catch(e => console.warn("audio init error", e));
+			} else if (audioContext.state === 'suspended') {
+				audioContext.resume();
+			}
+			canvas.removeEventListener('click', enableAudioOnFirstClick);
+			canvas.removeEventListener('keydown', enableAudioOnFirstClick);
+		}
+
+		canvas.addEventListener('click', enableAudioOnFirstClick);
+		canvas.addEventListener('keydown', enableAudioOnFirstClick);
+		// also try to init audio on window load
+		window.addEventListener('load', () => {
+			initAudio().catch(e => console.log("Audio not initialized yet", e));
+		});
+
 		initGame();
 		requestAnimationFrame(gameLoop);
-		canvas.addEventListener('click', () => canvas.focus());
 		canvas.focus();
 	})();
 </script>
