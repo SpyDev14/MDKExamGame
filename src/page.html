@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Vampire Survivors-like | Shotgun Arena | High Score + Recoil</title>
+    <title>Vampire Survivors-like | Shotgun Arena | HTML UI + High Score</title>
     <style>
         * {
             margin: 0;
@@ -23,6 +23,7 @@
         }
 
         .game-container {
+            position: relative;
             background: #11131a;
             border-radius: 20px;
             padding: 8px;
@@ -41,29 +42,150 @@
             outline: none;
         }
 
-        .controls-hint {
-            position: fixed;
-            bottom: 15px;
-            left: 15px;
-            color: #b0c4de;
-            font-family: monospace;
-            font-size: 13px;
-            background: rgba(0,0,0,0.65);
-            padding: 6px 14px;
-            border-radius: 24px;
-            pointer-events: none;
-            z-index: 100;
+        /* ---------- HTML UI (поверх canvas) ---------- */
+        .game-ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;  /* Чтобы клики проходили на canvas */
+            font-family: 'Courier New', 'Monaco', monospace;
+            z-index: 10;
+        }
+
+        /* Верхний правый угол: счёт и лучший результат */
+        .stats {
+            position: absolute;
+            top: 20px;
+            right: 25px;
+            text-align: right;
+            background: rgba(0, 0, 0, 0.55);
+            padding: 10px 18px;
+            border-radius: 20px;
             backdrop-filter: blur(4px);
+            border: 1px solid rgba(255, 215, 130, 0.4);
+            pointer-events: none;
+        }
+        .score {
+            font-size: 28px;
             font-weight: bold;
+            color: #f3d382;
+            text-shadow: 0 0 5px #ffa500;
+            letter-spacing: 1px;
+        }
+        .best {
+            font-size: 18px;
+            color: #e0b86e;
+            margin-top: 5px;
+            border-top: 1px solid #ffd96666;
+            padding-top: 4px;
+        }
+
+        /* Подсказка снизу */
+        .hint {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            padding: 8px 16px;
+            border-radius: 30px;
+            font-size: 16px;
+            font-weight: bold;
+            color: #afd5ff;
+            pointer-events: none;
+            border: 1px solid #3e5a6c;
+        }
+
+        /* Экран Game Over (скрыт по умолчанию) */
+        .gameover-panel {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(6px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 16px;
+            pointer-events: auto;   /* чтобы кнопка была кликабельна */
+            z-index: 20;
+            visibility: hidden;
+            border-radius: 12px;
+        }
+        .gameover-panel h1 {
+            font-size: 56px;
+            color: #f04e4e;
+            text-shadow: 0 0 10px #8b0000;
+            letter-spacing: 4px;
+        }
+        .final-score {
+            font-size: 32px;
+            color: #ddbb77;
+            background: #1e1a2f;
+            padding: 8px 24px;
+            border-radius: 40px;
+            font-weight: bold;
+        }
+        .best-score {
+            font-size: 22px;
+            color: #ffcc88;
+            margin-top: 4px;
+        }
+        .restart-btn {
+            margin-top: 20px;
+            background: #4a6e8a;
+            border: none;
+            font-family: 'Courier New', monospace;
+            font-size: 20px;
+            font-weight: bold;
+            padding: 10px 28px;
+            border-radius: 60px;
+            color: white;
+            cursor: pointer;
+            transition: 0.2s;
+            box-shadow: 0 4px 0 #1f3a4b;
+            pointer-events: auto;
+        }
+        .restart-btn:hover {
+            background: #5f85a3;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 0 #1f3a4b;
+        }
+        .restart-btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 0px 0 #1f3a4b;
+        }
+
+        /* Курсор всё ещё скрыт на canvas, но на UI может показываться обычный */
+        canvas:active, canvas:focus {
+            cursor: none;
         }
     </style>
 </head>
 <body>
-<div class="game-container">
+<div class="game-container" style="position: relative;">
     <canvas id="gameCanvas" width="1000" height="700" tabindex="0"></canvas>
-</div>
-<div class="controls-hint">
-    🎯 WASD / arrows = move | 🖱️ Left click = shotgun blast | 🔫 Aim with crosshair | 💥 Recoil
+    <!-- HTML UI поверх -->
+    <div class="game-ui">
+        <div class="stats">
+            <div class="score">🎯 <span id="uiScore">0</span></div>
+            <div class="best">🏆 BEST: <span id="uiBest">0</span></div>
+        </div>
+        <div class="hint">
+            🔫 CLICK TO SHOOT &nbsp;&nbsp;|&nbsp;&nbsp; 🎮 WASD / arrows
+        </div>
+        <div class="gameover-panel" id="gameoverPanel">
+            <h1>GAME OVER</h1>
+            <div class="final-score">FINAL SCORE: <span id="finalScoreSpan">0</span></div>
+            <div class="best-score">🏆 RECORD: <span id="finalBestSpan">0</span></div>
+            <button class="restart-btn" id="restartButton">▶ RESTART</button>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -72,6 +194,14 @@
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
+        // ---------- HTML UI elements ----------
+        const uiScoreSpan = document.getElementById('uiScore');
+        const uiBestSpan = document.getElementById('uiBest');
+        const gameoverPanel = document.getElementById('gameoverPanel');
+        const finalScoreSpan = document.getElementById('finalScoreSpan');
+        const finalBestSpan = document.getElementById('finalBestSpan');
+        const restartBtn = document.getElementById('restartButton');
+
         // ---------- HIGH SCORE (localStorage) ----------
         let highScore = 0;
         const HIGHSCORE_KEY = 'shotgun_highscore';
@@ -79,19 +209,34 @@
         function loadHighScore() {
             try {
                 const saved = localStorage.getItem(HIGHSCORE_KEY);
-                if (saved !== null) {
-                    highScore = parseInt(saved, 10) || 0;
-                }
+                if (saved !== null) highScore = parseInt(saved, 10) || 0;
+                uiBestSpan.textContent = highScore;
             } catch(e) { console.warn("localStorage error", e); }
         }
 
         function saveHighScoreIfNeeded(currentScore) {
             if (currentScore > highScore) {
                 highScore = currentScore;
+                uiBestSpan.textContent = highScore;
                 try {
                     localStorage.setItem(HIGHSCORE_KEY, highScore);
                 } catch(e) { console.warn("save failed", e); }
             }
+        }
+
+        function updateUI() {
+            uiScoreSpan.textContent = score;
+            uiBestSpan.textContent = highScore;
+        }
+
+        function showGameOverUI() {
+            finalScoreSpan.textContent = score;
+            finalBestSpan.textContent = highScore;
+            gameoverPanel.style.visibility = "visible";
+        }
+
+        function hideGameOverUI() {
+            gameoverPanel.style.visibility = "hidden";
         }
 
         // ---------- AUDIO CONTEXT & SOUNDS ----------
@@ -105,7 +250,6 @@
             "https://raw.githubusercontent.com/space-wizards/space-station-14/master/Resources/Audio/Voice/Zombie/zombie-2.ogg",
             "https://raw.githubusercontent.com/space-wizards/space-station-14/master/Resources/Audio/Voice/Zombie/zombie-3.ogg"
         ];
-
         const SHOTGUN_URL = "https://raw.githubusercontent.com/space-wizards/space-station-14/master/Resources/Audio/Weapons/Guns/Gunshots/shotgun.ogg";
 
         async function initAudio() {
@@ -116,8 +260,6 @@
                 if (shotgunResp.ok) {
                     const arrayBuffer = await shotgunResp.arrayBuffer();
                     shotgunBuffer = await audioContext.decodeAudioData(arrayBuffer);
-                } else {
-                    console.warn("Shotgun sound not available, using procedural");
                 }
                 for (let url of ZOMBIE_SOUND_URLS) {
                     try {
@@ -126,17 +268,11 @@
                             const buf = await resp.arrayBuffer();
                             const audioBuf = await audioContext.decodeAudioData(buf);
                             zombieSounds.push(audioBuf);
-                        } else {
-                            console.warn(`Zombie sound ${url} not found`);
                         }
-                    } catch(e) {
-                        console.warn(`Failed to load ${url}`, e);
-                    }
+                    } catch(e) {}
                 }
                 isAudioEnabled = true;
-                console.log(`Loaded ${zombieSounds.length} zombie sounds`);
             } catch (err) {
-                console.warn("Audio init failed, sounds disabled", err);
                 isAudioEnabled = false;
             }
         }
@@ -158,39 +294,18 @@
                 source.connect(audioContext.destination);
                 source.start();
             } else {
+                // minimal fallback (short noise)
                 const now = audioContext.currentTime;
-                const masterGain = audioContext.createGain();
-                masterGain.gain.setValueAtTime(0.45, now);
-                masterGain.connect(audioContext.destination);
-                const bufferSize = 4096;
-                const noiseNode = audioContext.createScriptProcessor(bufferSize, 1, 1);
-                noiseNode.onaudioprocess = function(e) {
-                    const output = e.outputBuffer.getChannelData(0);
-                    for (let i = 0; i < bufferSize; i++) output[i] = (Math.random() * 2 - 1) * 0.6;
-                };
-                const filter = audioContext.createBiquadFilter();
-                filter.type = "lowpass";
-                filter.frequency.value = 700;
-                filter.Q.value = 4;
-                noiseNode.connect(filter);
-                filter.connect(masterGain);
-                masterGain.gain.setValueAtTime(0.5, now);
-                masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
-                noiseNode.start();
-                noiseNode.stop(now + 0.25);
+                const gain = audioContext.createGain();
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+                gain.connect(audioContext.destination);
                 const osc = audioContext.createOscillator();
-                osc.type = "sine";
-                osc.frequency.value = 80;
-                const thumpGain = audioContext.createGain();
-                thumpGain.gain.setValueAtTime(0.3, now);
-                thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
-                osc.connect(thumpGain);
-                thumpGain.connect(masterGain);
+                osc.type = "sawtooth";
+                osc.frequency.value = 150;
+                osc.connect(gain);
                 osc.start();
-                osc.stop(now + 0.12);
-                setTimeout(() => {
-                    try { noiseNode.disconnect(); masterGain.disconnect(); } catch(e) {}
-                }, 300);
+                osc.stop(now + 0.2);
             }
         }
 
@@ -239,11 +354,9 @@
         const PLAYER_ACCEL_TIME = 0.25;
         const PLAYER_ACCEL = PLAYER_MAX_SPEED / PLAYER_ACCEL_TIME;
         const RECOIL_FORCE = 280;
-
         const HEALTH_BAR_WIDTH = 40;
         const HEALTH_BAR_HEIGHT = 7;
         const HEALTH_BAR_OFFSET_Y = -34;
-
         const SHOT_COOLDOWN = 0.55;
         let lastShotTime = 0;
         const PELLET_COUNT_MIN = 5;
@@ -254,14 +367,12 @@
         const PELLET_COLOR = '#FFD966';
         const SPREAD_ANGLE_DEG = 25;
         const SPREAD_ANGLE_RAD = SPREAD_ANGLE_DEG * Math.PI / 180;
-
         const ENEMY_RADIUS = 13;
         const ENEMY_COLOR = '#4CAF50';
         const ENEMY_BASE_SPEED = 90;
         const ACCELERATION_RADIUS = 9 * PLAYER_RADIUS;
         const ENEMY_ACCEL_FACTOR = 2.0;
         const ENEMY_HP = 1;
-
         const SPAWN_INTERVAL_START = 1.25;
         const SPAWN_INTERVAL_MIN = 0.32;
         const SPAWN_INTERVAL_DECAY_RATE = 0.021;
@@ -273,220 +384,145 @@
         let gameActive = true;
         let health = START_HEALTH;
         let score = 0;
-        let player = {
-            x: WORLD_WIDTH / 2,
-            y: WORLD_HEIGHT / 2,
-            radius: PLAYER_RADIUS,
-            velX: 0, velY: 0
-        };
+        let player = { x: WORLD_WIDTH/2, y: WORLD_HEIGHT/2, radius: PLAYER_RADIUS, velX: 0, velY: 0 };
         let enemies = [];
         let pellets = [];
         let lastSpawnTime = 0;
         let invincibleTimer = 0;
         let gameTimeElapsed = 0;
 
-        // Mouse position (world)
         let mouseWorldX = player.x, mouseWorldY = player.y;
         let mouseInsideCanvas = false;
         let rawMouseScreenX = 0, rawMouseScreenY = 0;
 
-        // ---------- INPUT: WASD + ARROWS (layout independent) ----------
+        // ---------- INPUT (layout independent) ----------
         const keyState = {
             KeyW: false, KeyA: false, KeyS: false, KeyD: false,
             ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false
         };
-
         function getMovementDirection() {
             let moveX = 0, moveY = 0;
             if (keyState.ArrowUp || keyState.KeyW) moveY -= 1;
             if (keyState.ArrowDown || keyState.KeyS) moveY += 1;
             if (keyState.ArrowLeft || keyState.KeyA) moveX -= 1;
             if (keyState.ArrowRight || keyState.KeyD) moveX += 1;
-            if (moveX !== 0 || moveY !== 0) {
-                const len = Math.hypot(moveX, moveY);
-                moveX /= len;
-                moveY /= len;
-            }
+            if (moveX !== 0 || moveY !== 0) { const len = Math.hypot(moveX, moveY); moveX /= len; moveY /= len; }
             return { moveX, moveY };
         }
 
-        // ---------- HELPER FUNCTIONS ----------
+        // ---------- HELPERS ----------
         function getCurrentSpawnInterval() {
             let interval = SPAWN_INTERVAL_START - (gameTimeElapsed * SPAWN_INTERVAL_DECAY_RATE);
             if (interval < SPAWN_INTERVAL_MIN) interval = SPAWN_INTERVAL_MIN;
             return interval;
         }
-
         function updateCamera() {
-            let targetX = player.x - CAM_VIEW_WIDTH / 2;
-            let targetY = player.y - CAM_VIEW_HEIGHT / 2;
+            let targetX = player.x - CAM_VIEW_WIDTH/2;
+            let targetY = player.y - CAM_VIEW_HEIGHT/2;
             targetX = Math.min(Math.max(targetX, 0), WORLD_WIDTH - CAM_VIEW_WIDTH);
             targetY = Math.min(Math.max(targetY, 0), WORLD_HEIGHT - CAM_VIEW_HEIGHT);
-            cameraX = targetX;
-            cameraY = targetY;
+            cameraX = targetX; cameraY = targetY;
         }
-
-        function worldToScreen(worldX, worldY) {
-            return { x: worldX - cameraX, y: worldY - cameraY };
-        }
-
-        function screenToWorld(screenX, screenY) {
-            return { x: screenX + cameraX, y: screenY + cameraY };
-        }
+        function worldToScreen(worldX, worldY) { return { x: worldX - cameraX, y: worldY - cameraY }; }
+        function screenToWorld(screenX, screenY) { return { x: screenX + cameraX, y: screenY + cameraY }; }
 
         function spawnEnemy() {
-            const viewLeft = cameraX;
-            const viewRight = cameraX + CAM_VIEW_WIDTH;
-            const viewTop = cameraY;
-            const viewBottom = cameraY + CAM_VIEW_HEIGHT;
-            let spawnX, spawnY;
-            const side = Math.floor(Math.random() * 4);
-            const margin = SPAWN_EXTRA_RADIUS;
-            if (side === 0) {
-                spawnX = viewLeft - margin - Math.random() * (margin * 0.8);
-                spawnY = viewTop + Math.random() * CAM_VIEW_HEIGHT;
-            } else if (side === 1) {
-                spawnX = viewRight + margin + Math.random() * (margin * 0.8);
-                spawnY = viewTop + Math.random() * CAM_VIEW_HEIGHT;
-            } else if (side === 2) {
-                spawnX = viewLeft + Math.random() * CAM_VIEW_WIDTH;
-                spawnY = viewTop - margin - Math.random() * (margin * 0.8);
-            } else {
-                spawnX = viewLeft + Math.random() * CAM_VIEW_WIDTH;
-                spawnY = viewBottom + margin + Math.random() * (margin * 0.8);
-            }
+            const viewLeft = cameraX, viewRight = cameraX + CAM_VIEW_WIDTH;
+            const viewTop = cameraY, viewBottom = cameraY + CAM_VIEW_HEIGHT;
+            let spawnX, spawnY; const side = Math.floor(Math.random() * 4); const margin = SPAWN_EXTRA_RADIUS;
+            if (side === 0) { spawnX = viewLeft - margin - Math.random()*margin*0.8; spawnY = viewTop + Math.random()*CAM_VIEW_HEIGHT; }
+            else if (side === 1) { spawnX = viewRight + margin + Math.random()*margin*0.8; spawnY = viewTop + Math.random()*CAM_VIEW_HEIGHT; }
+            else if (side === 2) { spawnX = viewLeft + Math.random()*CAM_VIEW_WIDTH; spawnY = viewTop - margin - Math.random()*margin*0.8; }
+            else { spawnX = viewLeft + Math.random()*CAM_VIEW_WIDTH; spawnY = viewBottom + margin + Math.random()*margin*0.8; }
             spawnX = Math.min(Math.max(spawnX, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
             spawnY = Math.min(Math.max(spawnY, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
-            enemies.push({
-                x: spawnX, y: spawnY, radius: ENEMY_RADIUS, hp: ENEMY_HP,
-                lastGroanTime: 0
-            });
+            enemies.push({ x: spawnX, y: spawnY, radius: ENEMY_RADIUS, hp: ENEMY_HP, lastGroanTime: 0 });
         }
 
         function fireShotgunAt(targetX, targetY, now) {
-            const dx = targetX - player.x;
-            const dy = targetY - player.y;
+            const dx = targetX - player.x, dy = targetY - player.y;
             const length = Math.hypot(dx, dy);
             if (length < 0.001) return;
             const baseAngle = Math.atan2(dy, dx);
             const pelletCount = Math.floor(Math.random() * (PELLET_COUNT_MAX - PELLET_COUNT_MIN + 1) + PELLET_COUNT_MIN);
-            for (let i = 0; i < pelletCount; i++) {
-                const spread = (Math.random() - 0.5) * 2 * SPREAD_ANGLE_RAD;
+            for (let i=0; i<pelletCount; i++) {
+                const spread = (Math.random() - 0.5)*2*SPREAD_ANGLE_RAD;
                 const angle = baseAngle + spread;
-                const vx = Math.cos(angle) * PELLET_SPEED;
-                const vy = Math.sin(angle) * PELLET_SPEED;
-                pellets.push({
-                    x: player.x, y: player.y, vx, vy,
-                    radius: PELLET_RADIUS,
-                    lifeSpan: PELLET_LIFESPAN,
-                    createdTime: now
-                });
+                const vx = Math.cos(angle)*PELLET_SPEED;
+                const vy = Math.sin(angle)*PELLET_SPEED;
+                pellets.push({ x: player.x, y: player.y, vx, vy, radius: PELLET_RADIUS, lifeSpan: PELLET_LIFESPAN, createdTime: now });
             }
-            // Apply recoil (opposite direction)
-            const recoilDirX = -dx / length;
-            const recoilDirY = -dy / length;
+            // Recoil
+            const recoilDirX = -dx/length, recoilDirY = -dy/length;
             player.velX += recoilDirX * RECOIL_FORCE;
             player.velY += recoilDirY * RECOIL_FORCE;
             const speed = Math.hypot(player.velX, player.velY);
-            if (speed > PLAYER_MAX_SPEED) {
-                player.velX = (player.velX / speed) * PLAYER_MAX_SPEED;
-                player.velY = (player.velY / speed) * PLAYER_MAX_SPEED;
-            }
+            if (speed > PLAYER_MAX_SPEED) { player.velX = (player.velX/speed)*PLAYER_MAX_SPEED; player.velY = (player.velY/speed)*PLAYER_MAX_SPEED; }
             playShotgunSound();
         }
 
-        // ---------- GAME UPDATES ----------
+        // ---------- UPDATE LOGIC ----------
         function updatePellets(deltaTime, now) {
-            for (let i = pellets.length-1; i >= 0; i--) {
+            for (let i=pellets.length-1; i>=0; i--) {
                 const p = pellets[i];
-                p.x += p.vx * deltaTime;
-                p.y += p.vy * deltaTime;
-                if (now - p.createdTime >= p.lifeSpan) {
-                    pellets.splice(i,1);
-                    continue;
-                }
-                if (p.x < -500 || p.x > WORLD_WIDTH+500 || p.y < -500 || p.y > WORLD_HEIGHT+500) {
-                    pellets.splice(i,1);
-                    continue;
-                }
+                p.x += p.vx*deltaTime; p.y += p.vy*deltaTime;
+                if (now - p.createdTime >= p.lifeSpan) { pellets.splice(i,1); continue; }
+                if (p.x < -500 || p.x > WORLD_WIDTH+500 || p.y < -500 || p.y > WORLD_HEIGHT+500) { pellets.splice(i,1); continue; }
                 let hitIndex = -1;
-                for (let j = 0; j < enemies.length; j++) {
+                for (let j=0; j<enemies.length; j++) {
                     const e = enemies[j];
-                    const dx = p.x - e.x;
-                    const dy = p.y - e.y;
-                    if (Math.hypot(dx, dy) < p.radius + e.radius) {
-                        hitIndex = j;
-                        break;
-                    }
+                    if (Math.hypot(p.x - e.x, p.y - e.y) < p.radius + e.radius) { hitIndex = j; break; }
                 }
                 if (hitIndex !== -1) {
-                    enemies.splice(hitIndex, 1);
+                    enemies.splice(hitIndex,1);
                     score++;
-                    // Update high score after each kill
                     saveHighScoreIfNeeded(score);
+                    updateUI();
                     pellets.splice(i,1);
                 }
             }
         }
 
         function updateEnemies(deltaTime, nowSec) {
-            for (let i = 0; i < enemies.length; i++) {
+            for (let i=0; i<enemies.length; i++) {
                 const e = enemies[i];
-                const dx = player.x - e.x;
-                const dy = player.y - e.y;
+                const dx = player.x - e.x, dy = player.y - e.y;
                 const distance = Math.hypot(dx, dy);
                 let currentSpeed = ENEMY_BASE_SPEED;
-                if (distance < ACCELERATION_RADIUS) {
-                    currentSpeed *= ENEMY_ACCEL_FACTOR;
-                }
+                if (distance < ACCELERATION_RADIUS) currentSpeed *= ENEMY_ACCEL_FACTOR;
                 if (distance > 0.01) {
-                    const move = currentSpeed * deltaTime;
-                    const stepX = (dx / distance) * move;
-                    const stepY = (dy / distance) * move;
-                    e.x += stepX;
-                    e.y += stepY;
+                    const move = currentSpeed*deltaTime;
+                    const stepX = (dx/distance)*move, stepY = (dy/distance)*move;
+                    e.x += stepX; e.y += stepY;
                 }
                 e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
                 e.y = Math.min(Math.max(e.y, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
-
-                const audible = distance < CAM_VIEW_HEIGHT / 2;
-                if (audible && gameActive && isAudioEnabled && zombieSounds.length > 0) {
+                if (distance < CAM_VIEW_HEIGHT/2 && gameActive && isAudioEnabled && zombieSounds.length>0) {
                     const now = nowSec;
-                    if (e.lastGroanTime === 0) {
-                        e.lastGroanTime = now + Math.random() * 2;
-                    }
-                    const intervalMin = 2.0;
-                    const intervalMax = 4.0;
-                    if (now - e.lastGroanTime >= intervalMin + Math.random() * (intervalMax - intervalMin)) {
+                    if (e.lastGroanTime === 0) e.lastGroanTime = now + Math.random()*2;
+                    if (now - e.lastGroanTime >= 2 + Math.random()*2) {
                         playRandomZombieSound(distance);
                         e.lastGroanTime = now;
                     }
                 }
             }
-
-            for (let i = 0; i < enemies.length; i++) {
+            for (let i=0; i<enemies.length; i++) {
                 const e = enemies[i];
-                const dx = player.x - e.x;
-                const dy = player.y - e.y;
+                const dx = player.x - e.x, dy = player.y - e.y;
                 const dist = Math.hypot(dx, dy);
                 const minDist = PLAYER_RADIUS + ENEMY_RADIUS;
                 if (dist < minDist) {
                     if (invincibleTimer <= 0 && gameActive) {
                         health--;
-                        if (health <= 0) {
-                            health = 0;
-                            gameActive = false;
-                        }
+                        if (health <= 0) { health = 0; gameActive = false; showGameOverUI(); }
                         invincibleTimer = INVINCIBLE_DURATION;
                     }
                     if (dist < 0.001) continue;
                     const overlap = minDist - dist;
                     const angle = Math.atan2(dy, dx);
                     const pushFactor = 0.01;
-                    const pushX = Math.cos(angle) * overlap * pushFactor;
-                    const pushY = Math.sin(angle) * overlap * pushFactor;
-                    e.x -= pushX;
-                    e.y -= pushY;
+                    const pushX = Math.cos(angle)*overlap*pushFactor, pushY = Math.sin(angle)*overlap*pushFactor;
+                    e.x -= pushX; e.y -= pushY;
                     e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
                     e.y = Math.min(Math.max(e.y, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
                 }
@@ -500,400 +536,203 @@
                 player.velX += moveX * PLAYER_ACCEL * deltaTime;
                 player.velY += moveY * PLAYER_ACCEL * deltaTime;
                 const speed = Math.hypot(player.velX, player.velY);
-                if (speed > PLAYER_MAX_SPEED) {
-                    player.velX = (player.velX / speed) * PLAYER_MAX_SPEED;
-                    player.velY = (player.velY / speed) * PLAYER_MAX_SPEED;
-                }
+                if (speed > PLAYER_MAX_SPEED) { player.velX = (player.velX/speed)*PLAYER_MAX_SPEED; player.velY = (player.velY/speed)*PLAYER_MAX_SPEED; }
             } else {
                 const speed = Math.hypot(player.velX, player.velY);
                 if (speed > 0) {
                     const decel = PLAYER_ACCEL * deltaTime;
                     const newSpeed = Math.max(0, speed - decel);
-                    if (newSpeed === 0) {
-                        player.velX = 0;
-                        player.velY = 0;
-                    } else {
-                        player.velX = (player.velX / speed) * newSpeed;
-                        player.velY = (player.velY / speed) * newSpeed;
-                    }
+                    if (newSpeed === 0) { player.velX = 0; player.velY = 0; }
+                    else { player.velX = (player.velX/speed)*newSpeed; player.velY = (player.velY/speed)*newSpeed; }
                 }
             }
-            let newX = player.x + player.velX * deltaTime;
-            let newY = player.y + player.velY * deltaTime;
+            let newX = player.x + player.velX*deltaTime, newY = player.y + player.velY*deltaTime;
             newX = Math.min(Math.max(newX, PLAYER_RADIUS), WORLD_WIDTH - PLAYER_RADIUS);
             newY = Math.min(Math.max(newY, PLAYER_RADIUS), WORLD_HEIGHT - PLAYER_RADIUS);
             if (newX === PLAYER_RADIUS || newX === WORLD_WIDTH - PLAYER_RADIUS) player.velX = 0;
             if (newY === PLAYER_RADIUS || newY === WORLD_HEIGHT - PLAYER_RADIUS) player.velY = 0;
-            player.x = newX;
-            player.y = newY;
+            player.x = newX; player.y = newY;
         }
 
         function trySpawnEnemy(now) {
             if (!gameActive) return;
-            const currentInterval = getCurrentSpawnInterval();
-            if (now - lastSpawnTime >= currentInterval) {
-                spawnEnemy();
-                lastSpawnTime = now;
-            }
+            if (now - lastSpawnTime >= getCurrentSpawnInterval()) { spawnEnemy(); lastSpawnTime = now; }
         }
+        function updateInvincibility(deltaTime) { if (invincibleTimer > 0) { invincibleTimer -= deltaTime; if (invincibleTimer < 0) invincibleTimer = 0; } }
 
-        function updateInvincibility(deltaTime) {
-            if (invincibleTimer > 0) {
-                invincibleTimer -= deltaTime;
-                if (invincibleTimer < 0) invincibleTimer = 0;
-            }
-        }
-
-        // ---------- MOUSE & CROSSHAIR UPDATES (60Hz) ----------
-        function refreshMousePosition() {
-            if (!mouseInsideCanvas) return;
-            const world = screenToWorld(rawMouseScreenX, rawMouseScreenY);
-            mouseWorldX = world.x;
-            mouseWorldY = world.y;
-        }
-
-        setInterval(() => {
-            if (mouseInsideCanvas && gameActive) {
-                refreshMousePosition();
-            }
-        }, 1000 / 60);
-
+        // ---------- MOUSE + 60Hz refresh ----------
+        function refreshMousePosition() { if (mouseInsideCanvas) { const w = screenToWorld(rawMouseScreenX, rawMouseScreenY); mouseWorldX = w.x; mouseWorldY = w.y; } }
+        setInterval(() => { if (mouseInsideCanvas && gameActive) refreshMousePosition(); }, 1000/60);
         function onMouseMove(e) {
             const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            let mouseCanvasX = (e.clientX - rect.left) * scaleX;
-            let mouseCanvasY = (e.clientY - rect.top) * scaleY;
-            mouseCanvasX = Math.min(Math.max(mouseCanvasX, 0), CAM_VIEW_WIDTH);
-            mouseCanvasY = Math.min(Math.max(mouseCanvasY, 0), CAM_VIEW_HEIGHT);
-            rawMouseScreenX = mouseCanvasX;
-            rawMouseScreenY = mouseCanvasY;
-            const worldPos = screenToWorld(mouseCanvasX, mouseCanvasY);
-            mouseWorldX = worldPos.x;
-            mouseWorldY = worldPos.y;
+            const scaleX = canvas.width/rect.width, scaleY = canvas.height/rect.height;
+            let mx = (e.clientX - rect.left)*scaleX, my = (e.clientY - rect.top)*scaleY;
+            mx = Math.min(Math.max(mx,0), CAM_VIEW_WIDTH); my = Math.min(Math.max(my,0), CAM_VIEW_HEIGHT);
+            rawMouseScreenX = mx; rawMouseScreenY = my;
+            const w = screenToWorld(mx, my); mouseWorldX = w.x; mouseWorldY = w.y;
             mouseInsideCanvas = true;
         }
-
-        function onMouseLeave() {
-            mouseInsideCanvas = false;
-        }
-
+        function onMouseLeave() { mouseInsideCanvas = false; }
         function handleCanvasClick(e) {
             if (!gameActive) return;
             const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            let mouseCanvasX = (e.clientX - rect.left) * scaleX;
-            let mouseCanvasY = (e.clientY - rect.top) * scaleY;
-            mouseCanvasX = Math.min(Math.max(mouseCanvasX, 0), CAM_VIEW_WIDTH);
-            mouseCanvasY = Math.min(Math.max(mouseCanvasY, 0), CAM_VIEW_HEIGHT);
-            const worldTarget = screenToWorld(mouseCanvasX, mouseCanvasY);
-            const now = performance.now() / 1000;
-            if (now - lastShotTime >= SHOT_COOLDOWN) {
-                fireShotgunAt(worldTarget.x, worldTarget.y, now);
-                lastShotTime = now;
-            }
+            const scaleX = canvas.width/rect.width, scaleY = canvas.height/rect.height;
+            let mx = (e.clientX - rect.left)*scaleX, my = (e.clientY - rect.top)*scaleY;
+            mx = Math.min(Math.max(mx,0), CAM_VIEW_WIDTH); my = Math.min(Math.max(my,0), CAM_VIEW_HEIGHT);
+            const worldTarget = screenToWorld(mx, my);
+            const now = performance.now()/1000;
+            if (now - lastShotTime >= SHOT_COOLDOWN) { fireShotgunAt(worldTarget.x, worldTarget.y, now); lastShotTime = now; }
         }
 
-        // ---------- RENDERING ----------
+        // ---------- RENDERING (canvas only: game objects + health bar) ----------
         function drawGrid() {
-            const startX = Math.floor(cameraX / GRID_STEP) * GRID_STEP;
-            const startY = Math.floor(cameraY / GRID_STEP) * GRID_STEP;
-            ctx.strokeStyle = GRID_COLOR;
-            ctx.lineWidth = 0.8;
-            for (let x = startX; x < cameraX + CAM_VIEW_WIDTH + GRID_STEP; x += GRID_STEP) {
-                const screenX = x - cameraX;
-                if (screenX >= 0 && screenX <= CAM_VIEW_WIDTH) {
-                    ctx.beginPath();
-                    ctx.moveTo(screenX, 0);
-                    ctx.lineTo(screenX, CAM_VIEW_HEIGHT);
-                    ctx.stroke();
-                }
+            const startX = Math.floor(cameraX/GRID_STEP)*GRID_STEP;
+            const startY = Math.floor(cameraY/GRID_STEP)*GRID_STEP;
+            ctx.strokeStyle = GRID_COLOR; ctx.lineWidth = 0.8;
+            for (let x=startX; x<cameraX+CAM_VIEW_WIDTH+GRID_STEP; x+=GRID_STEP) {
+                const sx = x - cameraX;
+                if (sx>=0 && sx<=CAM_VIEW_WIDTH) { ctx.beginPath(); ctx.moveTo(sx,0); ctx.lineTo(sx,CAM_VIEW_HEIGHT); ctx.stroke(); }
             }
-            for (let y = startY; y < cameraY + CAM_VIEW_HEIGHT + GRID_STEP; y += GRID_STEP) {
-                const screenY = y - cameraY;
-                if (screenY >= 0 && screenY <= CAM_VIEW_HEIGHT) {
-                    ctx.beginPath();
-                    ctx.moveTo(0, screenY);
-                    ctx.lineTo(CAM_VIEW_WIDTH, screenY);
-                    ctx.stroke();
-                }
+            for (let y=startY; y<cameraY+CAM_VIEW_HEIGHT+GRID_STEP; y+=GRID_STEP) {
+                const sy = y - cameraY;
+                if (sy>=0 && sy<=CAM_VIEW_HEIGHT) { ctx.beginPath(); ctx.moveTo(0,sy); ctx.lineTo(CAM_VIEW_WIDTH,sy); ctx.stroke(); }
             }
         }
-
-        function drawHealthBarAbovePlayer() {
+        function drawHealthBar() {
             if (health <= 0) return;
-            const screenPos = worldToScreen(player.x, player.y);
-            const barX = screenPos.x - HEALTH_BAR_WIDTH / 2;
-            const barY = screenPos.y + HEALTH_BAR_OFFSET_Y;
-            ctx.fillStyle = '#4a1a1a';
-            ctx.fillRect(barX, barY, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT);
-            const healthPercent = health / START_HEALTH;
-            const fillWidth = HEALTH_BAR_WIDTH * healthPercent;
-            ctx.fillStyle = '#e34d4d';
-            ctx.fillRect(barX, barY, fillWidth, HEALTH_BAR_HEIGHT);
-            ctx.strokeStyle = '#2c2c2c';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(barX, barY, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT);
+            const pos = worldToScreen(player.x, player.y);
+            const barX = pos.x - HEALTH_BAR_WIDTH/2, barY = pos.y + HEALTH_BAR_OFFSET_Y;
+            ctx.fillStyle = '#4a1a1a'; ctx.fillRect(barX, barY, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT);
+            const fillWidth = HEALTH_BAR_WIDTH * (health/START_HEALTH);
+            ctx.fillStyle = '#e34d4d'; ctx.fillRect(barX, barY, fillWidth, HEALTH_BAR_HEIGHT);
+            ctx.strokeStyle = '#2c2c2c'; ctx.lineWidth = 1; ctx.strokeRect(barX, barY, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT);
         }
-
         function drawPlayer() {
             const pos = worldToScreen(player.x, player.y);
-            let isInvincible = (invincibleTimer > 0 && gameActive);
-            if (isInvincible && (Math.floor(Date.now() / 50) % 3 < 1)) {
-                ctx.globalAlpha = 0.55;
-            } else {
-                ctx.globalAlpha = 1;
-            }
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = "#00ccff80";
-            ctx.beginPath();
-            ctx.arc(pos.x, pos.y, PLAYER_RADIUS, 0, Math.PI*2);
-            ctx.fillStyle = PLAYER_COLOR;
-            ctx.fill();
-            ctx.strokeStyle = "#ffffffcc";
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.arc(pos.x, pos.y, PLAYER_RADIUS-3, 0, Math.PI*2);
-            ctx.fillStyle = "#88ffff80";
-            ctx.fill();
-
+            const inv = (invincibleTimer > 0 && gameActive);
+            ctx.globalAlpha = (inv && (Math.floor(Date.now()/50)%3<1)) ? 0.55 : 1;
+            ctx.shadowBlur = 10; ctx.shadowColor = "#00ccff80";
+            ctx.beginPath(); ctx.arc(pos.x, pos.y, PLAYER_RADIUS, 0, Math.PI*2);
+            ctx.fillStyle = PLAYER_COLOR; ctx.fill();
+            ctx.strokeStyle = "#ffffffcc"; ctx.lineWidth=2; ctx.stroke();
+            ctx.beginPath(); ctx.arc(pos.x, pos.y, PLAYER_RADIUS-3, 0, Math.PI*2);
+            ctx.fillStyle = "#88ffff80"; ctx.fill();
             if (gameActive) {
-                const now = performance.now() / 1000;
+                const now = performance.now()/1000;
                 const timeSinceLast = now - lastShotTime;
                 if (timeSinceLast < SHOT_COOLDOWN) {
-                    const cooldownRemaining = SHOT_COOLDOWN - timeSinceLast;
-                    const progress = 1 - (cooldownRemaining / SHOT_COOLDOWN);
+                    const progress = 1 - ((SHOT_COOLDOWN - timeSinceLast)/SHOT_COOLDOWN);
                     const radius = PLAYER_RADIUS + 6;
-                    const startAngle = -Math.PI / 2;
-                    const endAngle = startAngle + (Math.PI * 2 * progress);
-                    ctx.beginPath();
-                    ctx.arc(pos.x, pos.y, radius, startAngle, endAngle);
-                    ctx.lineWidth = 2.5;
-                    ctx.strokeStyle = "#FFE484";
-                    ctx.stroke();
+                    const start = -Math.PI/2, end = start + Math.PI*2*progress;
+                    ctx.beginPath(); ctx.arc(pos.x, pos.y, radius, start, end);
+                    ctx.lineWidth = 2.5; ctx.strokeStyle = "#FFE484"; ctx.stroke();
                 }
             }
-            ctx.shadowBlur = 0;
-            ctx.globalAlpha = 1;
+            ctx.shadowBlur = 0; ctx.globalAlpha = 1;
         }
-
         function drawEnemies() {
             for (const e of enemies) {
-                const screenPos = worldToScreen(e.x, e.y);
-                if (screenPos.x + ENEMY_RADIUS < 0 || screenPos.x - ENEMY_RADIUS > CAM_VIEW_WIDTH ||
-                    screenPos.y + ENEMY_RADIUS < 0 || screenPos.y - ENEMY_RADIUS > CAM_VIEW_HEIGHT) continue;
-                ctx.shadowBlur = 6;
-                ctx.shadowColor = "#2e7d32";
-                ctx.beginPath();
-                ctx.arc(screenPos.x, screenPos.y, ENEMY_RADIUS, 0, Math.PI*2);
-                ctx.fillStyle = ENEMY_COLOR;
-                ctx.fill();
-                ctx.strokeStyle = "#1b5e20";
-                ctx.lineWidth = 1.5;
-                ctx.stroke();
+                const pos = worldToScreen(e.x, e.y);
+                if (pos.x+ENEMY_RADIUS<0 || pos.x-ENEMY_RADIUS>CAM_VIEW_WIDTH || pos.y+ENEMY_RADIUS<0 || pos.y-ENEMY_RADIUS>CAM_VIEW_HEIGHT) continue;
+                ctx.shadowBlur = 6; ctx.shadowColor = "#2e7d32";
+                ctx.beginPath(); ctx.arc(pos.x, pos.y, ENEMY_RADIUS, 0, Math.PI*2);
+                ctx.fillStyle = ENEMY_COLOR; ctx.fill();
+                ctx.strokeStyle = "#1b5e20"; ctx.lineWidth=1.5; ctx.stroke();
             }
             ctx.shadowBlur = 0;
         }
-
         function drawPellets() {
             for (const p of pellets) {
-                const screenPos = worldToScreen(p.x, p.y);
-                if (screenPos.x + PELLET_RADIUS < 0 || screenPos.x - PELLET_RADIUS > CAM_VIEW_WIDTH ||
-                    screenPos.y + PELLET_RADIUS < 0 || screenPos.y - PELLET_RADIUS > CAM_VIEW_HEIGHT) continue;
-                ctx.beginPath();
-                ctx.arc(screenPos.x, screenPos.y, PELLET_RADIUS-1, 0, Math.PI*2);
-                ctx.fillStyle = PELLET_COLOR;
-                ctx.fill();
-                ctx.beginPath();
-                ctx.arc(screenPos.x, screenPos.y, PELLET_RADIUS-2, 0, Math.PI*2);
-                ctx.fillStyle = "#FFAA33";
-                ctx.fill();
+                const pos = worldToScreen(p.x, p.y);
+                if (pos.x+PELLET_RADIUS<0 || pos.x-PELLET_RADIUS>CAM_VIEW_WIDTH || pos.y+PELLET_RADIUS<0 || pos.y-PELLET_RADIUS>CAM_VIEW_HEIGHT) continue;
+                ctx.beginPath(); ctx.arc(pos.x, pos.y, PELLET_RADIUS-1, 0, Math.PI*2);
+                ctx.fillStyle = PELLET_COLOR; ctx.fill();
+                ctx.beginPath(); ctx.arc(pos.x, pos.y, PELLET_RADIUS-2, 0, Math.PI*2);
+                ctx.fillStyle = "#FFAA33"; ctx.fill();
             }
         }
-
         function drawCrosshair() {
             if (!mouseInsideCanvas) return;
             const screenMouse = worldToScreen(mouseWorldX, mouseWorldY);
-            if (screenMouse.x < 0 || screenMouse.x > CAM_VIEW_WIDTH || screenMouse.y < 0 || screenMouse.y > CAM_VIEW_HEIGHT) return;
-            ctx.save();
-            ctx.shadowBlur = 0;
-            ctx.strokeStyle = "#ffffff";
-            ctx.lineWidth = 2;
+            if (screenMouse.x<0 || screenMouse.x>CAM_VIEW_WIDTH || screenMouse.y<0 || screenMouse.y>CAM_VIEW_HEIGHT) return;
+            ctx.save(); ctx.shadowBlur = 0;
+            ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2;
             const size = 12;
-            ctx.beginPath();
-            ctx.moveTo(screenMouse.x - size, screenMouse.y);
-            ctx.lineTo(screenMouse.x - 4, screenMouse.y);
-            ctx.moveTo(screenMouse.x + 4, screenMouse.y);
-            ctx.lineTo(screenMouse.x + size, screenMouse.y);
-            ctx.moveTo(screenMouse.x, screenMouse.y - size);
-            ctx.lineTo(screenMouse.x, screenMouse.y - 4);
-            ctx.moveTo(screenMouse.x, screenMouse.y + 4);
-            ctx.lineTo(screenMouse.x, screenMouse.y + size);
+            ctx.beginPath(); ctx.moveTo(screenMouse.x - size, screenMouse.y); ctx.lineTo(screenMouse.x - 4, screenMouse.y);
+            ctx.moveTo(screenMouse.x + 4, screenMouse.y); ctx.lineTo(screenMouse.x + size, screenMouse.y);
+            ctx.moveTo(screenMouse.x, screenMouse.y - size); ctx.lineTo(screenMouse.x, screenMouse.y - 4);
+            ctx.moveTo(screenMouse.x, screenMouse.y + 4); ctx.lineTo(screenMouse.x, screenMouse.y + size);
             ctx.stroke();
-            ctx.beginPath();
-            ctx.arc(screenMouse.x, screenMouse.y, 6, 0, Math.PI * 2);
-            ctx.strokeStyle = "#aaffdd";
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.arc(screenMouse.x, screenMouse.y, 2, 0, Math.PI * 2);
-            ctx.fillStyle = "#ffcc77";
-            ctx.fill();
+            ctx.beginPath(); ctx.arc(screenMouse.x, screenMouse.y, 6, 0, Math.PI*2);
+            ctx.strokeStyle = "#aaffdd"; ctx.stroke();
+            ctx.beginPath(); ctx.arc(screenMouse.x, screenMouse.y, 2, 0, Math.PI*2);
+            ctx.fillStyle = "#ffcc77"; ctx.fill();
             ctx.restore();
         }
+        function drawBackground() { ctx.fillStyle = BACKGROUND_COLOR; ctx.fillRect(0,0,CAM_VIEW_WIDTH,CAM_VIEW_HEIGHT); drawGrid(); }
 
-        function drawUI() {
-            // Current score (top right)
-            ctx.font = "bold 26 'Courier New', monospace";
-            ctx.shadowBlur = 0;
-            ctx.fillStyle = "#f3d382";
-            ctx.fillText(`🎯 ${score}`, CAM_VIEW_WIDTH - 135, 52);
-            // High score (below current score)
-            ctx.font = "bold 20 'Courier New', monospace";
-            ctx.fillStyle = "#e0b86e";
-            ctx.fillText(`🏆 BEST: ${highScore}`, CAM_VIEW_WIDTH - 155, 92);
-            // Shotgun hint
-            ctx.font = "bold 18 monospace";
-            ctx.fillStyle = "#afd5ff";
-            ctx.fillText("⚡ CLICK TO SHOOT", CAM_VIEW_WIDTH - 220, 130);
-        }
-
-        function drawGameOver() {
-            ctx.globalAlpha = 0.85;
-            ctx.fillStyle = "#02040c";
-            ctx.fillRect(0, 0, CAM_VIEW_WIDTH, CAM_VIEW_HEIGHT);
-            ctx.globalAlpha = 1;
-            ctx.font = "800 48 'Courier New', monospace";
-            ctx.fillStyle = "#f04e4e";
-            ctx.fillText("GAME OVER", CAM_VIEW_WIDTH/2 - 150, CAM_VIEW_HEIGHT/2 - 50);
-            ctx.font = "28 monospace";
-            ctx.fillStyle = "#ddbb77";
-            ctx.fillText(`FINAL SCORE: ${score}`, CAM_VIEW_WIDTH/2 - 130, CAM_VIEW_HEIGHT/2 + 40);
-            ctx.font = "20 monospace";
-            ctx.fillStyle = "#ffbb77";
-            ctx.fillText(`BEST: ${highScore}`, CAM_VIEW_WIDTH/2 - 70, CAM_VIEW_HEIGHT/2 + 90);
-            ctx.font = "16 monospace";
-            ctx.fillStyle = "#aaaaaa";
-            ctx.fillText("press F5 or refresh to restart", CAM_VIEW_WIDTH/2 - 150, CAM_VIEW_HEIGHT/2 + 130);
-        }
-
-        function drawBackground() {
-            ctx.fillStyle = BACKGROUND_COLOR;
-            ctx.fillRect(0, 0, CAM_VIEW_WIDTH, CAM_VIEW_HEIGHT);
-            drawGrid();
-        }
-
-        // ---------- GAME LOOP ----------
+        // ---------- MAIN LOOP ----------
         let lastTimestamp = 0;
-
         function gameLoop(nowMs) {
-            const nowSec = nowMs / 1000;
-            if (lastTimestamp === 0) {
-                lastTimestamp = nowSec;
-                lastSpawnTime = nowSec;
-                lastShotTime = nowSec;
-                requestAnimationFrame(gameLoop);
-                return;
-            }
-            let deltaTime = Math.min(0.033, nowSec - lastTimestamp);
-            if (deltaTime <= 0) {
-                lastTimestamp = nowSec;
-                requestAnimationFrame(gameLoop);
-                return;
-            }
+            const nowSec = nowMs/1000;
+            if (lastTimestamp===0) { lastTimestamp=nowSec; lastSpawnTime=nowSec; lastShotTime=nowSec; requestAnimationFrame(gameLoop); return; }
+            let dt = Math.min(0.033, nowSec - lastTimestamp);
+            if (dt<=0) { lastTimestamp=nowSec; requestAnimationFrame(gameLoop); return; }
             if (gameActive) {
-                gameTimeElapsed += deltaTime;
-            }
-            if (gameActive) {
-                updatePlayer(deltaTime);
-                updateCamera();
-                updateEnemies(deltaTime, nowSec);
-                updatePellets(deltaTime, nowSec);
-                updateInvincibility(deltaTime);
-                trySpawnEnemy(nowSec);
-            } else {
-                updateCamera();
-            }
-            drawBackground();
-            drawPellets();
-            drawEnemies();
-            drawPlayer();
-            drawHealthBarAbovePlayer();
-            drawCrosshair();
-            drawUI();
-            if (!gameActive) drawGameOver();
+                gameTimeElapsed += dt;
+                updatePlayer(dt); updateCamera(); updateEnemies(dt, nowSec); updatePellets(dt, nowSec);
+                updateInvincibility(dt); trySpawnEnemy(nowSec);
+            } else { updateCamera(); }
+            drawBackground(); drawPellets(); drawEnemies(); drawPlayer(); drawHealthBar(); drawCrosshair();
             lastTimestamp = nowSec;
             requestAnimationFrame(gameLoop);
         }
 
-        // ---------- KEYBOARD HANDLERS ----------
-        function handleKeyDown(e) {
-            const code = e.code;
-            if (keyState.hasOwnProperty(code)) {
-                keyState[code] = true;
-                e.preventDefault();
-            }
-            if (code === 'ArrowUp' || code === 'ArrowDown' || code === 'ArrowLeft' || code === 'ArrowRight') {
-                e.preventDefault();
-            }
+        // ---------- RESTART GAME ----------
+        function restartGame() {
+            // reset all state
+            gameActive = true;
+            health = START_HEALTH;
+            score = 0;
+            enemies = [];
+            pellets = [];
+            invincibleTimer = 0;
+            gameTimeElapsed = 0;
+            player.x = WORLD_WIDTH/2;
+            player.y = WORLD_HEIGHT/2;
+            player.velX = 0; player.velY = 0;
+            const nowPerf = performance.now()/1000;
+            lastSpawnTime = nowPerf;
+            lastShotTime = nowPerf;
+            for (let i=0; i<3; i++) spawnEnemy();
+            updateCamera();
+            mouseWorldX = player.x; mouseWorldY = player.y;
+            updateUI();
+            hideGameOverUI();
         }
 
-        function handleKeyUp(e) {
-            const code = e.code;
-            if (keyState.hasOwnProperty(code)) {
-                keyState[code] = false;
-                e.preventDefault();
-            }
-        }
+        // ---------- EVENT LISTENERS ----------
+        function handleKeyDown(e) { const c=e.code; if(keyState.hasOwnProperty(c)) { keyState[c]=true; e.preventDefault(); } if(c==='ArrowUp'||c==='ArrowDown'||c==='ArrowLeft'||c==='ArrowRight') e.preventDefault(); }
+        function handleKeyUp(e) { const c=e.code; if(keyState.hasOwnProperty(c)) { keyState[c]=false; e.preventDefault(); } }
+        function enableAudio() { if(!audioContext) initAudio().catch(e=>console.warn); else if(audioContext.state==='suspended') audioContext.resume(); }
 
-        function enableAudioOnFirstInteraction() {
-            if (!audioContext) initAudio().catch(e=>console.warn);
-            else if (audioContext.state === 'suspended') audioContext.resume();
-        }
-
-        canvas.addEventListener('click', (e) => {
-            enableAudioOnFirstInteraction();
-            handleCanvasClick(e);
-        });
+        canvas.addEventListener('click', (e) => { enableAudio(); handleCanvasClick(e); });
         canvas.addEventListener('mousemove', onMouseMove);
         canvas.addEventListener('mouseleave', onMouseLeave);
         canvas.addEventListener('keydown', handleKeyDown);
         canvas.addEventListener('keyup', handleKeyUp);
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
+        restartBtn.addEventListener('click', () => { restartGame(); });
 
+        loadHighScore();
+        updateUI();
+        initGame();
         function initGame() {
-            enemies = [];
-            pellets = [];
-            health = START_HEALTH;
-            score = 0;
-            gameActive = true;
-            invincibleTimer = 0;
-            gameTimeElapsed = 0;
-            player.x = WORLD_WIDTH / 2;
-            player.y = WORLD_HEIGHT / 2;
-            player.velX = 0;
-            player.velY = 0;
-            const nowPerf = performance.now() / 1000;
-            lastSpawnTime = nowPerf;
-            lastShotTime = nowPerf;
-            for (let i = 0; i < 3; i++) spawnEnemy();
-            updateCamera();
-            mouseWorldX = player.x;
-            mouseWorldY = player.y;
-            // High score already loaded
+            restartGame(); // same logic
         }
 
-        // Load high score from storage before starting
-        loadHighScore();
-
-        window.addEventListener('load', () => {
-            initAudio().catch(e=>console.log);
-            initGame();
-            requestAnimationFrame(gameLoop);
-        });
+        window.addEventListener('load', () => { initAudio().catch(e=>console.log); initGame(); requestAnimationFrame(gameLoop); });
         canvas.focus();
     })();
 </script>
