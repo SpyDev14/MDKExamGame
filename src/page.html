@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Vampire Survivors-like | Shotgun Arena | Bite Sound</title>
+    <title>Vampire Survivors-like | Shotgun Arena | Fixed zombie sounds</title>
     <style>
         * {
             margin: 0;
@@ -239,6 +239,7 @@
         // Пути к звукам (относительно page.html)
         const SHOTGUN_PATH = "resources/audio/shotgun-shot.ogg";
         const BITE_PATH = "resources/audio/bite.ogg";
+        // Только три звука зомби (без zombie-4)
         const ZOMBIE_PATHS = [
             "resources/audio/zombie-1.ogg",
             "resources/audio/zombie-2.ogg",
@@ -482,7 +483,7 @@
                 if (dist < minDist) {
                     if (invincibleTimer <= 0 && gameActive) {
                         health--;
-                        playBiteSound(); // звук укуса при нанесении урона
+                        playBiteSound();
                         if (health <= 0) { health = 0; gameActive = false; showGameOverUI(); }
                         invincibleTimer = INVINCIBLE_DURATION;
                     }
