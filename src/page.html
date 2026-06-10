@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Vampire Survivors-like | Shotgun Arena | Local Audio (HTML5 Audio)</title>
+    <title>Vampire Survivors-like | Shotgun Arena | Bite Sound</title>
     <style>
         * {
             margin: 0;
@@ -233,14 +233,16 @@
             gameoverPanel.style.visibility = "hidden";
         }
 
-        // ---------- AUDIO USING HTMLAudioElement (no CORS, simple) ----------
-        // Paths relative to page.html (adjust if needed: now expecting folder "resources/audio/")
+        // ---------- AUDIO (HTMLAudioElement) ----------
+        let audioEnabled = false;
+
+        // Пути к звукам (относительно page.html)
         const SHOTGUN_PATH = "resources/audio/shotgun-shot.ogg";
+        const BITE_PATH = "resources/audio/bite.ogg";
         const ZOMBIE_PATHS = [
             "resources/audio/zombie-1.ogg",
             "resources/audio/zombie-2.ogg",
-            "resources/audio/zombie-3.ogg",
-            "resources/audio/zombie-4.ogg"
+            "resources/audio/zombie-3.ogg"
         ];
         const BODYFALL_PATHS = [
             "resources/audio/bodyfall-1.ogg",
@@ -249,53 +251,57 @@
             "resources/audio/bodyfall-4.ogg"
         ];
 
-        let audioUnlocked = false;
-
-        // Simple play function using HTMLAudioElement
-        function playSound(src, volume = 1.0) {
-            if (!audioUnlocked) return;
+        function playShotgunSound() {
+            if (!audioEnabled) return;
             try {
-                const audio = new Audio(src);
-                audio.volume = Math.min(1.0, Math.max(0, volume));
-                audio.play().catch(e => console.warn("play error", e));
-            } catch(e) { console.warn("Audio error", e); }
+                const audio = new Audio(SHOTGUN_PATH);
+                audio.volume = 0.7;
+                audio.play().catch(e => console.log("Shotgun play failed", e));
+            } catch(e) {}
         }
 
-        function playShotgunSound() {
-            playSound(SHOTGUN_PATH, 0.9);
+        function playBiteSound() {
+            if (!audioEnabled) return;
+            try {
+                const audio = new Audio(BITE_PATH);
+                audio.volume = 0.9;
+                audio.play().catch(e => console.log("Bite play failed", e));
+            } catch(e) {}
         }
 
         function playRandomBodyfallSound() {
-            if (BODYFALL_PATHS.length === 0) return;
-            const randomIdx = Math.floor(Math.random() * BODYFALL_PATHS.length);
-            playSound(BODYFALL_PATHS[randomIdx], 0.7);
+            if (!audioEnabled) return;
+            const idx = Math.floor(Math.random() * BODYFALL_PATHS.length);
+            try {
+                const audio = new Audio(BODYFALL_PATHS[idx]);
+                audio.volume = 0.6;
+                audio.play().catch(e => console.log("Bodyfall play failed", e));
+            } catch(e) {}
         }
 
         function playRandomZombieSound(distance) {
-            if (ZOMBIE_PATHS.length === 0) return;
-            // Volume falloff: minDistance = 2*playerRadius (32), maxDistance = screenHeight (700)
+            if (!audioEnabled) return;
             const minDistance = 2 * PLAYER_RADIUS;
             const maxDistance = CAM_VIEW_HEIGHT;
             let volume = 0;
-            if (distance <= minDistance) volume = 1.35;
+            if (distance <= minDistance) volume = 1.0;
             else if (distance >= maxDistance) volume = 0;
-            else volume = 1.35 * (1 - (distance - minDistance) / (maxDistance - minDistance));
-            volume = Math.min(1.35, Math.max(0, volume));
-            if (volume <= 0.01) return;
-            const randomIdx = Math.floor(Math.random() * ZOMBIE_PATHS.length);
-            playSound(ZOMBIE_PATHS[randomIdx], volume);
+            else volume = 1.0 * (1 - (distance - minDistance) / (maxDistance - minDistance));
+            volume = Math.min(1.0, Math.max(0, volume));
+            if (volume <= 0.05) return;
+            const idx = Math.floor(Math.random() * ZOMBIE_PATHS.length);
+            try {
+                const audio = new Audio(ZOMBIE_PATHS[idx]);
+                audio.volume = volume;
+                audio.play().catch(e => console.log("Zombie groan failed", e));
+            } catch(e) {}
         }
 
-        // Unlock audio on first user interaction (click on canvas)
-        function unlockAudio() {
-            if (audioUnlocked) return;
-            audioUnlocked = true;
-            // Play a silent dummy sound to unlock (optional, but ensures future plays work)
-            try {
-                const dummy = new Audio();
-                dummy.play().catch(()=>{});
-            } catch(e) {}
-            console.log("Audio unlocked");
+        function enableAudio() {
+            if (!audioEnabled) {
+                audioEnabled = true;
+                console.log("Audio enabled");
+            }
         }
 
         // ---------- WORLD & CAMERA ----------
@@ -459,7 +465,7 @@
                 }
                 e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
                 e.y = Math.min(Math.max(e.y, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
-                if (distance < CAM_VIEW_HEIGHT && gameActive && audioUnlocked) {
+                if (distance < CAM_VIEW_HEIGHT && gameActive && audioEnabled) {
                     const now = nowSec;
                     if (e.lastGroanTime === 0) e.lastGroanTime = now + Math.random()*2;
                     if (now - e.lastGroanTime >= 2 + Math.random()*2) {
@@ -476,6 +482,7 @@
                 if (dist < minDist) {
                     if (invincibleTimer <= 0 && gameActive) {
                         health--;
+                        playBiteSound(); // звук укуса при нанесении урона
                         if (health <= 0) { health = 0; gameActive = false; showGameOverUI(); }
                         invincibleTimer = INVINCIBLE_DURATION;
                     }
@@ -537,7 +544,6 @@
         function onMouseLeave() { mouseInsideCanvas = false; }
         function handleCanvasClick(e) {
             if (!gameActive) return;
-            unlockAudio(); // ensure audio unlocked on first click
             const rect = canvas.getBoundingClientRect();
             const scaleX = canvas.width/rect.width, scaleY = canvas.height/rect.height;
             let mx = (e.clientX - rect.left)*scaleX, my = (e.clientY - rect.top)*scaleY;
@@ -676,8 +682,9 @@
         // ---------- EVENT LISTENERS ----------
         function handleKeyDown(e) { const c=e.code; if(keyState.hasOwnProperty(c)) { keyState[c]=true; e.preventDefault(); } if(c==='ArrowUp'||c==='ArrowDown'||c==='ArrowLeft'||c==='ArrowRight') e.preventDefault(); }
         function handleKeyUp(e) { const c=e.code; if(keyState.hasOwnProperty(c)) { keyState[c]=false; e.preventDefault(); } }
+        function firstInteraction() { enableAudio(); }
 
-        canvas.addEventListener('click', (e) => { handleCanvasClick(e); });
+        canvas.addEventListener('click', (e) => { firstInteraction(); handleCanvasClick(e); });
         canvas.addEventListener('mousemove', onMouseMove);
         canvas.addEventListener('mouseleave', onMouseLeave);
         canvas.addEventListener('keydown', handleKeyDown);
@@ -690,7 +697,6 @@
         updateUI();
         function initGame() { restartGame(); }
 
-        // Preload audio files? Not needed, they will load on first play.
         window.addEventListener('load', () => { initGame(); requestAnimationFrame(gameLoop); });
         canvas.focus();
     })();
