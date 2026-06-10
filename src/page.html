@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+	<title>Vampire Survivors-like | Shotgun Arena</title>
+	<style>
+		* {
+			margin: 0;
+			padding: 0;
+			box-sizing: border-box;
+			user-select: none;
+		}
+
+		body {
+			background: #0a0c12;
+			min-height: 100vh;
+			display: flex;
+			justify-content: center;
+			align-items: center;
+			font-family: 'Courier New', 'Monaco', monospace;
+			overflow: hidden;
+		}
+
+		.game-container {
+			background: #11131a;
+			border-radius: 20px;
+			padding: 8px;
+			box-shadow: 0 20px 35px rgba(0, 0, 0, 0.5);
+		}
+
+		canvas {
+			display: block;
+			margin: 0 auto;
+			border-radius: 12px;
+			box-shadow: 0 0 0 2px #2e3a44, 0 0 0 5px #0f1117;
+			cursor: none;
+		}
+
+		/* Для красоты: отключаем выделение */
+		canvas:focus {
+			outline: none;
+		}
+	</style>
+</head>
+<body>
+<div class="game-container">
+	<canvas id="gameCanvas" width="1000" height="700" tabindex="0"></canvas>
+</div>
+
+<script>
+	(function() {
+		// ---------- CANVAS ----------
+		const canvas = document.getElementById('gameCanvas');
+		const ctx = canvas.getContext('2d');
+
+		// ---------- GAME CONSTANTS ----------
+		// World & visual
+		const BACKGROUND_COLOR = '#151e27';
+		const GRID_COLOR = '#253644';
+
+		// Player settings
+		const PLAYER_RADIUS = 16;
+		const PLAYER_COLOR = '#2ad4ff';
+		const PLAYER_INVINCIBLE_COLOR = '#b0f0ff';
+		const PLAYER_SPEED = 340;          // pixels per second
+
+		// Shotgun (pellets)
+		const SHOT_COOLDOWN = 0.8;          // seconds between shots
+		const PELLET_COUNT_MIN = 5;
+		const PELLET_COUNT_MAX = 8;
+		const PELLET_RADIUS = 4;
+		const PELLET_SPEED = 430;           // px/sec
+		const PELLET_LIFESPAN = 0.65;        // seconds
+		const PELLET_COLOR = '#FFD966';
+		const SPREAD_ANGLE_DEG = 25;         // ±25 degrees
+		const SPREAD_ANGLE_RAD = SPREAD_ANGLE_DEG * Math.PI / 180;
+
+		// Enemy settings
+		const ENEMY_RADIUS = 13;
+		const ENEMY_COLOR = '#D64545';
+		const ENEMY_SPEED = 128;             // px/sec (toward player)
+		const ENEMY_HP = 1;                  // one-hit kill by pellet
+
+		// Spawn difficulty (interval shrinks over time)
+		const SPAWN_INTERVAL_START = 1.25;    // seconds between spawns at start
+		const SPAWN_INTERVAL_MIN = 0.32;      // minimum interval (high difficulty)
+		const SPAWN_INTERVAL_DECAY_RATE = 0.021; // per second: interval decreases by this each sec
+
+		// Health & invincibility
+		const START_HEALTH = 5;
+		const INVINCIBLE_DURATION = 0.5;      // seconds after hit
+
+		// Collision & boundaries (player cannot leave canvas)
+		const MAP_WIDTH = canvas.width;
+		const MAP_HEIGHT = canvas.height;
+
+		// ---------- GLOBAL STATE ----------
+		let gameActive = true;
+		let health = START_HEALTH;
+		let score = 0;                 // enemies killed
+
+		// Player position
+		let player = {
+			x: MAP_WIDTH / 2,
+			y: MAP_HEIGHT / 2,
+			radius: PLAYER_RADIUS
+		};
+
+		// Dynamic arrays
+		let enemies = [];       // {x, y, radius, hp}
+		let pellets = [];       // {x, y, vx, vy, radius, lifeSpan, createdTime}
+
+		// Timers & cooldowns
+		let lastShotTime = 0;
+		let lastSpawnTime = 0;
+		let invincibleTimer = 0;     // >0 means invincible frames (seconds left)
+
+		// For difficulty (game time elapsed)
+		let gameTimeElapsed = 0;      // seconds since game started (active only)
+
+		// Input handling
+		const keys = {
+			ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false,
+			w: false, s: false, a: false, d: false
+		};
+
+		// ---------- HELPER FUNCTIONS ----------
+		function getCurrentSpawnInterval() {
+			// interval decreases as gameTimeElapsed increases, but never below SPAWN_INTERVAL_MIN
+			let interval = SPAWN_INTERVAL_START - (gameTimeElapsed * SPAWN_INTERVAL_DECAY_RATE);
+			if (interval < SPAWN_INTERVAL_MIN) interval = SPAWN_INTERVAL_MIN;
+			return interval;
+		}
+
+		// Spawn enemy strictly OUTSIDE canvas (on perimeter)
+		function spawnEnemy() {
+			const side = Math.floor(Math.random() * 4); // 0:left,1:right,2:top,3:bottom
+			let x, y;
+			const pad = ENEMY_RADIUS + 2;
+			if (side === 0) { // left
+				x = -pad;
+				y = Math.random() * MAP_HEIGHT;
+			} else if (side === 1) { // right
+				x = MAP_WIDTH + pad;
+				y = Math.random() * MAP_HEIGHT;
+			} else if (side === 2) { // top
+				x = Math.random() * MAP_WIDTH;
+				y = -pad;
+			} else { // bottom
+				x = Math.random() * MAP_WIDTH;
+				y = MAP_HEIGHT + pad;
+			}
+
+			enemies.push({
+				x: x,
+				y: y,
+				radius: ENEMY_RADIUS,
+				hp: ENEMY_HP
+			});
+		}
+
+		// Find nearest enemy (returns index and distance)
+		function findNearestEnemy() {
+			if (enemies.length === 0) return null;
+			let minDist = Infinity;
+			let nearestIdx = -1;
+			for (let i = 0; i < enemies.length; i++) {
+				const e = enemies[i];
+				const dx = e.x - player.x;
+				const dy = e.y - player.y;
+				const dist = Math.hypot(dx, dy);
+				if (dist < minDist) {
+					minDist = dist;
+					nearestIdx = i;
+				}
+			}
+			if (nearestIdx === -1) return null;
+			return { enemy: enemies[nearestIdx], index: nearestIdx, distance: minDist };
+		}
+
+		// Fire shotgun (create pellets toward nearest enemy)
+		function fireShotgun(now) {
+			const nearest = findNearestEnemy();
+			if (!nearest) return;   // no enemies, no shooting
+
+			const angleToEnemy = Math.atan2(nearest.enemy.y - player.y, nearest.enemy.x - player.x);
+			const pelletCount = Math.floor(Math.random() * (PELLET_COUNT_MAX - PELLET_COUNT_MIN + 1) + PELLET_COUNT_MIN);
+
+			for (let i = 0; i < pelletCount; i++) {
+				// random spread angle within ±SPREAD_ANGLE_RAD
+				const spread = (Math.random() - 0.5) * 2 * SPREAD_ANGLE_RAD;
+				const angle = angleToEnemy + spread;
+				const vx = Math.cos(angle) * PELLET_SPEED;
+				const vy = Math.sin(angle) * PELLET_SPEED;
+
+				pellets.push({
+					x: player.x,
+					y: player.y,
+					vx: vx,
+					vy: vy,
+					radius: PELLET_RADIUS,
+					lifeSpan: PELLET_LIFESPAN,
+					createdTime: now
+				});
+			}
+		}
+
+		// Update pellets: movement, lifespan, collision with enemies
+		function updatePellets(deltaTime, now) {
+			for (let i = pellets.length-1; i >= 0; i--) {
+				const p = pellets[i];
+				// movement
+				p.x += p.vx * deltaTime;
+				p.y += p.vy * deltaTime;
+
+				// life check
+				if (now - p.createdTime >= p.lifeSpan) {
+					pellets.splice(i,1);
+					continue;
+				}
+
+				// collision with enemies (pellet kills one enemy)
+				let hitIndex = -1;
+				for (let j = 0; j < enemies.length; j++) {
+					const e = enemies[j];
+					const dx = p.x - e.x;
+					const dy = p.y - e.y;
+					const dist = Math.hypot(dx, dy);
+					if (dist < p.radius + e.radius) {
+						hitIndex = j;
+						break;
+					}
+				}
+				if (hitIndex !== -1) {
+					// enemy destroyed, increase score, remove pellet
+					enemies.splice(hitIndex, 1);
+					score++;
+					pellets.splice(i,1);
+				}
+			}
+		}
+
+		// Update enemies: move toward player, boundary clamp, collision with player (damage + push)
+		function updateEnemies(deltaTime, now) {
+			// movement toward player
+			for (let i = 0; i < enemies.length; i++) {
+				const e = enemies[i];
+				const dx = player.x - e.x;
+				const dy = player.y - e.y;
+				const length = Math.hypot(dx, dy);
+				if (length > 0.01) {
+					const move = ENEMY_SPEED * deltaTime;
+					const stepX = (dx / length) * move;
+					const stepY = (dy / length) * move;
+					e.x += stepX;
+					e.y += stepY;
+				}
+				// clamp enemies to canvas boundaries (so they don't go off completely, but can be slightly outside? keep inside for fairness)
+				e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), MAP_WIDTH - ENEMY_RADIUS);
+				e.y = Math.min(Math.max(e.y, ENEMY_RADIUS), MAP_HEIGHT - ENEMY_RADIUS);
+			}
+
+			// collision player vs enemy (damage + pushback to avoid sticking)
+			for (let i = 0; i < enemies.length; i++) {
+				const e = enemies[i];
+				const dx = player.x - e.x;
+				const dy = player.y - e.y;
+				const dist = Math.hypot(dx, dy);
+				const minDist = PLAYER_RADIUS + ENEMY_RADIUS;
+				if (dist < minDist) {
+					// apply damage if not invincible
+					if (invincibleTimer <= 0 && gameActive) {
+						health--;
+						if (health <= 0) {
+							health = 0;
+							gameActive = false;
+						}
+						invincibleTimer = INVINCIBLE_DURATION;
+					}
+
+					// PUSH enemy away to avoid multiple instant collisions (soft collision resolution)
+					if (dist < 0.001) continue;
+					const overlap = minDist - dist;
+					const angle = Math.atan2(dy, dx);
+					const pushX = Math.cos(angle) * overlap;
+					const pushY = Math.sin(angle) * overlap;
+					e.x -= pushX;
+					e.y -= pushY;
+
+					// re-clamp enemy after push
+					e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), MAP_WIDTH - ENEMY_RADIUS);
+					e.y = Math.min(Math.max(e.y, ENEMY_RADIUS), MAP_HEIGHT - ENEMY_RADIUS);
+				}
+			}
+		}
+
+		// Update player movement (WASD / arrows) + boundaries
+		function updatePlayer(deltaTime) {
+			let moveX = 0, moveY = 0;
+			if (keys.ArrowUp || keys.w) moveY -= 1;
+			if (keys.ArrowDown || keys.s) moveY += 1;
+			if (keys.ArrowLeft || keys.a) moveX -= 1;
+			if (keys.ArrowRight || keys.d) moveX += 1;
+
+			if (moveX !== 0 || moveY !== 0) {
+				const len = Math.hypot(moveX, moveY);
+				moveX /= len;
+				moveY /= len;
+			}
+
+			let newX = player.x + moveX * PLAYER_SPEED * deltaTime;
+			let newY = player.y + moveY * PLAYER_SPEED * deltaTime;
+
+			// boundaries with radius
+			newX = Math.min(Math.max(newX, PLAYER_RADIUS), MAP_WIDTH - PLAYER_RADIUS);
+			newY = Math.min(Math.max(newY, PLAYER_RADIUS), MAP_HEIGHT - PLAYER_RADIUS);
+			player.x = newX;
+			player.y = newY;
+		}
+
+		// Spawn enemies based on dynamic interval & game time
+		function trySpawnEnemy(now) {
+			if (!gameActive) return;
+			const currentInterval = getCurrentSpawnInterval();
+			if (now - lastSpawnTime >= currentInterval) {
+				spawnEnemy();
+				lastSpawnTime = now;
+			}
+		}
+
+		// Auto shotgun shooting (cooldown)
+		function tryAutoShoot(now) {
+			if (!gameActive) return;
+			if (now - lastShotTime >= SHOT_COOLDOWN) {
+				// only shoot if there is at least one enemy
+				if (enemies.length > 0) {
+					fireShotgun(now);
+					lastShotTime = now;
+				}
+			}
+		}
+
+		// Update invincibility timer
+		function updateInvincibility(deltaTime) {
+			if (invincibleTimer > 0) {
+				invincibleTimer -= deltaTime;
+				if (invincibleTimer < 0) invincibleTimer = 0;
+			}
+		}
+
+		// ---------- RENDERING (with style, grid, UI, reload indicator) ----------
+		function drawGrid() {
+			ctx.strokeStyle = GRID_COLOR;
+			ctx.lineWidth = 0.8;
+			const step = 40;
+			for (let x = 0; x < MAP_WIDTH; x += step) {
+				ctx.beginPath();
+				ctx.moveTo(x, 0);
+				ctx.lineTo(x, MAP_HEIGHT);
+				ctx.stroke();
+			}
+			for (let y = 0; y < MAP_HEIGHT; y += step) {
+				ctx.beginPath();
+				ctx.moveTo(0, y);
+				ctx.lineTo(MAP_WIDTH, y);
+				ctx.stroke();
+			}
+		}
+
+		function drawPlayer() {
+			// invincibility blink effect (opacity)
+			let isInvincible = (invincibleTimer > 0 && gameActive);
+			if (isInvincible && (Math.floor(Date.now() / 50) % 3 < 1)) {
+				ctx.globalAlpha = 0.55;
+			} else {
+				ctx.globalAlpha = 1;
+			}
+
+			// shadow for depth
+			ctx.shadowBlur = 10;
+			ctx.shadowColor = "#00ccff80";
+			ctx.beginPath();
+			ctx.arc(player.x, player.y, PLAYER_RADIUS, 0, Math.PI*2);
+			ctx.fillStyle = PLAYER_COLOR;
+			ctx.fill();
+			ctx.strokeStyle = "#ffffffcc";
+			ctx.lineWidth = 2;
+			ctx.stroke();
+
+			// inner glow
+			ctx.beginPath();
+			ctx.arc(player.x, player.y, PLAYER_RADIUS-3, 0, Math.PI*2);
+			ctx.fillStyle = "#88ffff80";
+			ctx.fill();
+
+			// reload indicator (circular progress bar around player)
+			if (gameActive && enemies.length > 0) {
+				const now = performance.now() / 1000;
+				const timeSinceLastShot = now - lastShotTime;
+				let cooldownRemaining = SHOT_COOLDOWN - timeSinceLastShot;
+				if (cooldownRemaining < 0) cooldownRemaining = 0;
+				const progress = 1 - (cooldownRemaining / SHOT_COOLDOWN);
+				if (progress < 1) {
+					const radius = PLAYER_RADIUS + 6;
+					const startAngle = -Math.PI / 2;
+					const endAngle = startAngle + (Math.PI * 2 * progress);
+					ctx.beginPath();
+					ctx.arc(player.x, player.y, radius, startAngle, endAngle);
+					ctx.lineWidth = 3;
+					ctx.strokeStyle = "#FFE484";
+					ctx.shadowBlur = 4;
+					ctx.stroke();
+				}
+			}
+			ctx.shadowBlur = 0;
+			ctx.globalAlpha = 1;
+		}
+
+		function drawEnemies() {
+			for (const e of enemies) {
+				ctx.shadowBlur = 8;
+				ctx.shadowColor = "#b00000";
+				ctx.beginPath();
+				ctx.arc(e.x, e.y, ENEMY_RADIUS, 0, Math.PI*2);
+				ctx.fillStyle = ENEMY_COLOR;
+				ctx.fill();
+				ctx.strokeStyle = "#ff8080";
+				ctx.lineWidth = 1.5;
+				ctx.stroke();
+				// evil eyes
+				ctx.beginPath();
+				ctx.arc(e.x-4, e.y-3, 3, 0, Math.PI*2);
+				ctx.fillStyle = "#ffffff";
+				ctx.fill();
+				ctx.beginPath();
+				ctx.arc(e.x+4, e.y-3, 3, 0, Math.PI*2);
+				ctx.fill();
+				ctx.fillStyle = "#000000";
+				ctx.beginPath();
+				ctx.arc(e.x-4.5, e.y-4, 1.2, 0, Math.PI*2);
+				ctx.fill();
+				ctx.beginPath();
+				ctx.arc(e.x+3.5, e.y-4, 1.2, 0, Math.PI*2);
+				ctx.fill();
+			}
+			ctx.shadowBlur = 0;
+		}
+
+		function drawPellets() {
+			for (const p of pellets) {
+				ctx.beginPath();
+				ctx.arc(p.x, p.y, PELLET_RADIUS-1, 0, Math.PI*2);
+				ctx.fillStyle = PELLET_COLOR;
+				ctx.fill();
+				ctx.beginPath();
+				ctx.arc(p.x, p.y, PELLET_RADIUS-2, 0, Math.PI*2);
+				ctx.fillStyle = "#FFAA33";
+				ctx.fill();
+			}
+		}
+
+		function drawUI() {
+			// HP bar (left top)
+			ctx.font = "bold 26 'Courier New', monospace";
+			ctx.shadowBlur = 0;
+			ctx.fillStyle = "#ffbd87";
+			ctx.fillText(`❤️ ${health}/${START_HEALTH}`, 22, 52);
+			// Score (right top)
+			ctx.fillStyle = "#f3d382";
+			ctx.fillText(`🎯 ${score}`, MAP_WIDTH - 135, 52);
+
+			// extra glow effect
+			ctx.font = "bold 18 monospace";
+			ctx.fillStyle = "#afd5ff";
+			ctx.fillText("⚡ AUTO SHOTGUN", MAP_WIDTH - 210, 100);
+		}
+
+		function drawGameOver() {
+			ctx.globalAlpha = 0.85;
+			ctx.fillStyle = "#02040c";
+			ctx.fillRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+			ctx.globalAlpha = 1;
+			ctx.font = "800 48 'Courier New', monospace";
+			ctx.fillStyle = "#f04e4e";
+			ctx.shadowBlur = 0;
+			ctx.fillText("GAME OVER", MAP_WIDTH/2 - 150, MAP_HEIGHT/2 - 50);
+			ctx.font = "28 monospace";
+			ctx.fillStyle = "#ddbb77";
+			ctx.fillText(`FINAL SCORE: ${score}`, MAP_WIDTH/2 - 130, MAP_HEIGHT/2 + 40);
+			ctx.font = "16 monospace";
+			ctx.fillStyle = "#aaaaaa";
+			ctx.fillText("press F5 or refresh to restart", MAP_WIDTH/2 - 150, MAP_HEIGHT/2 + 110);
+		}
+
+		function drawBackground() {
+			ctx.fillStyle = BACKGROUND_COLOR;
+			ctx.fillRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+			drawGrid();
+		}
+
+		// ---------- MAIN GAME LOOP (delta time & state update) ----------
+		let lastTimestamp = 0;
+		let previousGameTime = 0;
+
+		function gameLoop(nowMs) {
+			const nowSec = nowMs / 1000;
+			if (lastTimestamp === 0) {
+				lastTimestamp = nowSec;
+				lastSpawnTime = nowSec;
+				lastShotTime = nowSec;
+				requestAnimationFrame(gameLoop);
+				return;
+			}
+
+			let deltaTime = Math.min(0.033, nowSec - lastTimestamp); // cap 33ms
+			if (deltaTime <= 0) {
+				lastTimestamp = nowSec;
+				requestAnimationFrame(gameLoop);
+				return;
+			}
+
+			// update gameTime elapsed (only if active)
+			if (gameActive) {
+				gameTimeElapsed += deltaTime;
+			}
+
+			// update game mechanics only if active
+			if (gameActive) {
+				updatePlayer(deltaTime);
+				updateEnemies(deltaTime, nowSec);
+				updatePellets(deltaTime, nowSec);
+				updateInvincibility(deltaTime);
+				trySpawnEnemy(nowSec);
+				tryAutoShoot(nowSec);
+			}
+
+			// RENDER EVERYTHING
+			drawBackground();
+			drawPellets();
+			drawEnemies();
+			drawPlayer();
+			drawUI();
+
+			if (!gameActive) {
+				drawGameOver();
+			}
+
+			lastTimestamp = nowSec;
+			requestAnimationFrame(gameLoop);
+		}
+
+		// ---------- INPUT HANDLERS ----------
+		function handleKeyDown(e) {
+			const key = e.key;
+			if (keys.hasOwnProperty(key)) {
+				keys[key] = true;
+				e.preventDefault();
+			}
+			// optional: prevent arrow keys from scrolling
+			if (key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight') {
+				e.preventDefault();
+			}
+		}
+
+		function handleKeyUp(e) {
+			const key = e.key;
+			if (keys.hasOwnProperty(key)) {
+				keys[key] = false;
+				e.preventDefault();
+			}
+		}
+
+		// block context menu on canvas
+		canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+		window.addEventListener('keydown', handleKeyDown);
+		window.addEventListener('keyup', handleKeyUp);
+
+		// initial spawn of few enemies to kickstart action
+		function initGame() {
+			enemies = [];
+			pellets = [];
+			health = START_HEALTH;
+			score = 0;
+			gameActive = true;
+			invincibleTimer = 0;
+			gameTimeElapsed = 0;
+			player.x = MAP_WIDTH/2;
+			player.y = MAP_HEIGHT/2;
+			const nowPerf = performance.now() / 1000;
+			lastSpawnTime = nowPerf;
+			lastShotTime = nowPerf;
+			// initial 3 enemies to avoid empty start
+			for (let i = 0; i < 3; i++) {
+				spawnEnemy();
+			}
+		}
+
+		// reset on page reload? we call init but we also need to clean arrays
+		initGame();
+		// start game loop
+		requestAnimationFrame(gameLoop);
+
+		// optional: ensure canvas focus for key handling (no side effects)
+		canvas.addEventListener('click', () => canvas.focus());
+		canvas.focus();
+	})();
+</script>
+</body>
+</html>
