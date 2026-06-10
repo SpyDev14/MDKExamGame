@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Vampire Survivors-like | Shotgun Arena | Fixed zombie sounds</title>
+    <title>Vampire Survivors-like | Shotgun Arena | Knockback + Longer Invincibility</title>
     <style>
         * {
             margin: 0;
@@ -236,10 +236,8 @@
         // ---------- AUDIO (HTMLAudioElement) ----------
         let audioEnabled = false;
 
-        // Пути к звукам (относительно page.html)
         const SHOTGUN_PATH = "resources/audio/shotgun-shot.ogg";
         const BITE_PATH = "resources/audio/bite.ogg";
-        // Только три звука зомби (без zombie-4)
         const ZOMBIE_PATHS = [
             "resources/audio/zombie-1.ogg",
             "resources/audio/zombie-2.ogg",
@@ -322,6 +320,7 @@
         const PLAYER_ACCEL_TIME = 0.25;
         const PLAYER_ACCEL = PLAYER_MAX_SPEED / PLAYER_ACCEL_TIME;
         const RECOIL_FORCE = 280;
+        const KNOCKBACK_FORCE = 380;          // сила отбрасывания игрока при укусе
         const HEALTH_BAR_WIDTH = 40;
         const HEALTH_BAR_HEIGHT = 7;
         const HEALTH_BAR_OFFSET_Y = -34;
@@ -345,7 +344,7 @@
         const SPAWN_INTERVAL_MIN = 0.32;
         const SPAWN_INTERVAL_DECAY_RATE = 0.021;
         const START_HEALTH = 5;
-        const INVINCIBLE_DURATION = 0.5;
+        const INVINCIBLE_DURATION = 0.75;      // увеличено до 0.75 сек
         const SPAWN_EXTRA_RADIUS = 250;
 
         // ---------- GLOBAL STATE ----------
@@ -484,6 +483,20 @@
                     if (invincibleTimer <= 0 && gameActive) {
                         health--;
                         playBiteSound();
+                        // Отбрасывание игрока (knockback) в противоположную сторону от зомби
+                        if (dist > 0.001) {
+                            const angle = Math.atan2(dy, dx);
+                            const knockX = Math.cos(angle) * KNOCKBACK_FORCE;
+                            const knockY = Math.sin(angle) * KNOCKBACK_FORCE;
+                            player.velX += knockX;
+                            player.velY += knockY;
+                            // Ограничиваем скорость, чтобы не вылететь за пределы мира мгновенно
+                            const spd = Math.hypot(player.velX, player.velY);
+                            if (spd > PLAYER_MAX_SPEED * 1.5) {
+                                player.velX = (player.velX / spd) * PLAYER_MAX_SPEED * 1.5;
+                                player.velY = (player.velY / spd) * PLAYER_MAX_SPEED * 1.5;
+                            }
+                        }
                         if (health <= 0) { health = 0; gameActive = false; showGameOverUI(); }
                         invincibleTimer = INVINCIBLE_DURATION;
                     }
