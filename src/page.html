@@ -231,9 +231,11 @@
 
         // ---------- AUDIO (HTMLAudioElement) ----------
         let audioEnabled = false;
+        let bgMusic = null; // фоновая музыка
 
         const SHOTGUN_PATH = "resources/audio/shotgun-shot.ogg";
         const BITE_PATH = "resources/audio/bite.ogg";
+        const THEME_PATH = "resources/audio/main-theme.ogg";
         const ZOMBIE_PATHS = [
             "resources/audio/zombie-1.ogg",
             "resources/audio/zombie-2.ogg",
@@ -259,7 +261,7 @@
             if (!audioEnabled) return;
             try {
                 const audio = new Audio(BITE_PATH);
-                audio.volume = 0.9;
+                audio.volume = 1.25;
                 audio.play().catch(e => console.log("Bite play failed", e));
             } catch(e) {}
         }
@@ -269,7 +271,7 @@
             const idx = Math.floor(Math.random() * BODYFALL_PATHS.length);
             try {
                 const audio = new Audio(BODYFALL_PATHS[idx]);
-                audio.volume = 0.6;
+                audio.volume = 0.85;
                 audio.play().catch(e => console.log("Bodyfall play failed", e));
             } catch(e) {}
         }
@@ -292,9 +294,21 @@
             } catch(e) {}
         }
 
+        function startBackgroundMusic() {
+            if (!audioEnabled) return;
+            if (bgMusic) return; // уже запущена
+            try {
+                bgMusic = new Audio(THEME_PATH);
+                bgMusic.loop = true;
+                bgMusic.volume = 0.65; // негромко, чтобы не заглушать эффекты
+                bgMusic.play().catch(e => console.log("Background music play failed", e));
+            } catch(e) {}
+        }
+
         function enableAudio() {
             if (!audioEnabled) {
                 audioEnabled = true;
+                startBackgroundMusic();
                 console.log("Audio enabled");
             }
         }
@@ -316,7 +330,7 @@
         const PLAYER_ACCEL_TIME = 0.25;
         const PLAYER_ACCEL = PLAYER_MAX_SPEED / PLAYER_ACCEL_TIME;
         const RECOIL_FORCE = 280;
-        const KNOCKBACK_FORCE = 380;          // сила отбрасывания игрока при укусе
+        const KNOCKBACK_FORCE = 380;
         const HEALTH_BAR_WIDTH = 40;
         const HEALTH_BAR_HEIGHT = 7;
         const HEALTH_BAR_OFFSET_Y = -34;
@@ -332,7 +346,8 @@
         const SPREAD_ANGLE_RAD = SPREAD_ANGLE_DEG * Math.PI / 180;
         const ENEMY_RADIUS = 13;
         const ENEMY_COLOR = '#4CAF50';
-        const ENEMY_BASE_SPEED = 90;
+        // Базовая скорость увеличена в 1.5 раза: было 90, стало 135
+        const ENEMY_BASE_SPEED = 135;
         const ACCELERATION_RADIUS = 9 * PLAYER_RADIUS;
         const ENEMY_ACCEL_FACTOR = 2.0;
         const ENEMY_HP = 1;
@@ -340,7 +355,7 @@
         const SPAWN_INTERVAL_MIN = 0.32;
         const SPAWN_INTERVAL_DECAY_RATE = 0.021;
         const START_HEALTH = 5;
-        const INVINCIBLE_DURATION = 0.75;      // увеличено до 0.75 сек
+        const INVINCIBLE_DURATION = 0.75;
         const SPAWN_EXTRA_RADIUS = 250;
 
         // ---------- GLOBAL STATE ----------
@@ -358,7 +373,7 @@
         let mouseInsideCanvas = false;
         let rawMouseScreenX = 0, rawMouseScreenY = 0;
 
-        // ---------- INPUT (layout independent) ----------
+        // ---------- INPUT ----------
         const keyState = {
             KeyW: false, KeyA: false, KeyS: false, KeyD: false,
             ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false
@@ -479,14 +494,12 @@
                     if (invincibleTimer <= 0 && gameActive) {
                         health--;
                         playBiteSound();
-                        // Отбрасывание игрока (knockback) в противоположную сторону от зомби
                         if (dist > 0.001) {
                             const angle = Math.atan2(dy, dx);
                             const knockX = Math.cos(angle) * KNOCKBACK_FORCE;
                             const knockY = Math.sin(angle) * KNOCKBACK_FORCE;
                             player.velX += knockX;
                             player.velY += knockY;
-                            // Ограничиваем скорость, чтобы не вылететь за пределы мира мгновенно
                             const spd = Math.hypot(player.velX, player.velY);
                             if (spd > PLAYER_MAX_SPEED * 1.5) {
                                 player.velX = (player.velX / spd) * PLAYER_MAX_SPEED * 1.5;
@@ -687,6 +700,7 @@
             mouseWorldX = player.x; mouseWorldY = player.y;
             updateUI();
             hideGameOverUI();
+            // Музыка уже играет, не трогаем
         }
 
         // ---------- EVENT LISTENERS ----------
