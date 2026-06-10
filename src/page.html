@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Vampire Survivors-like | Shotgun Arena | HTML UI + High Score</title>
+    <title>Vampire Survivors-like | Shotgun Arena | Local Audio</title>
     <style>
         * {
             margin: 0;
@@ -161,7 +161,6 @@
             box-shadow: 0 0px 0 #1f3a4b;
         }
 
-        /* Курсор всё ещё скрыт на canvas, но на UI может показываться обычный */
         canvas:active, canvas:focus {
             cursor: none;
         }
@@ -170,7 +169,6 @@
 <body>
 <div class="game-container" style="position: relative;">
     <canvas id="gameCanvas" width="1000" height="700" tabindex="0"></canvas>
-    <!-- HTML UI поверх -->
     <div class="game-ui">
         <div class="stats">
             <div class="score">🎯 <span id="uiScore">0</span></div>
@@ -239,81 +237,121 @@
             gameoverPanel.style.visibility = "hidden";
         }
 
-        // ---------- AUDIO CONTEXT & SOUNDS ----------
+        // ---------- AUDIO CONTEXT & LOCAL FILES ----------
         let audioContext = null;
         let shotgunBuffer = null;
-        let zombieSounds = [];
+        let zombieSounds = [];      // 4 звука рычания
+        let bodyFallSounds = [];    // 4 звука падения
         let isAudioEnabled = false;
 
-        const ZOMBIE_SOUND_URLS = [
-            "https://raw.githubusercontent.com/space-wizards/space-station-14/master/Resources/Audio/Voice/Zombie/zombie-1.ogg",
-            "https://raw.githubusercontent.com/space-wizards/space-station-14/master/Resources/Audio/Voice/Zombie/zombie-2.ogg",
-            "https://raw.githubusercontent.com/space-wizards/space-station-14/master/Resources/Audio/Voice/Zombie/zombie-3.ogg"
+        // Локальные пути (относительно page.html)
+        const SHOTGUN_PATH = "resources/audio/shotgun-shot.ogg";
+        const ZOMBIE_PATHS = [
+            "resources/audio/zombie-1.ogg",
+            "resources/audio/zombie-2.ogg",
+            "resources/audio/zombie-3.ogg",
+            "resources/audio/zombie-4.ogg"
         ];
-        const SHOTGUN_URL = "https://raw.githubusercontent.com/space-wizards/space-station-14/master/Resources/Audio/Weapons/Guns/Gunshots/shotgun.ogg";
+        const BODYFALL_PATHS = [
+            "resources/audio/bodyfall-1.ogg",
+            "resources/audio/bodyfall-2.ogg",
+            "resources/audio/bodyfall-3.ogg",
+            "resources/audio/bodyfall-4.ogg"
+        ];
 
         async function initAudio() {
             if (audioContext) return;
             try {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                const shotgunResp = await fetch(SHOTGUN_URL);
+
+                // Загрузка звука выстрела
+                const shotgunResp = await fetch(SHOTGUN_PATH);
                 if (shotgunResp.ok) {
                     const arrayBuffer = await shotgunResp.arrayBuffer();
                     shotgunBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                } else {
+                    console.warn("Shotgun sound not found at", SHOTGUN_PATH);
                 }
-                for (let url of ZOMBIE_SOUND_URLS) {
+
+                // Загрузка звуков зомби (рычание)
+                for (let url of ZOMBIE_PATHS) {
                     try {
                         const resp = await fetch(url);
                         if (resp.ok) {
                             const buf = await resp.arrayBuffer();
                             const audioBuf = await audioContext.decodeAudioData(buf);
                             zombieSounds.push(audioBuf);
+                        } else {
+                            console.warn(`Zombie sound not found: ${url}`);
                         }
-                    } catch(e) {}
+                    } catch(e) { console.warn(`Failed to load ${url}`, e); }
                 }
+
+                // Загрузка звуков падения тел
+                for (let url of BODYFALL_PATHS) {
+                    try {
+                        const resp = await fetch(url);
+                        if (resp.ok) {
+                            const buf = await resp.arrayBuffer();
+                            const audioBuf = await audioContext.decodeAudioData(buf);
+                            bodyFallSounds.push(audioBuf);
+                        } else {
+                            console.warn(`Bodyfall sound not found: ${url}`);
+                        }
+                    } catch(e) { console.warn(`Failed to load ${url}`, e); }
+                }
+
                 isAudioEnabled = true;
+                console.log(`Loaded: shotgun=${!!shotgunBuffer}, zombie=${zombieSounds.length}, bodyfall=${bodyFallSounds.length}`);
             } catch (err) {
                 isAudioEnabled = false;
+                console.warn("Audio init failed, sounds disabled", err);
             }
         }
 
         function playShotgunSound() {
-            if (!audioContext || !isAudioEnabled) return;
+            if (!audioContext || !isAudioEnabled || !shotgunBuffer) return;
             if (audioContext.state === 'suspended') {
-                audioContext.resume().then(() => playShotgunInternal()).catch(e=>console.log);
+                audioContext.resume().then(() => {
+                    const source = audioContext.createBufferSource();
+                    source.buffer = shotgunBuffer;
+                    source.connect(audioContext.destination);
+                    source.start();
+                }).catch(e=>console.log);
             } else {
-                playShotgunInternal();
-            }
-        }
-
-        function playShotgunInternal() {
-            if (!audioContext || !isAudioEnabled) return;
-            if (shotgunBuffer) {
                 const source = audioContext.createBufferSource();
                 source.buffer = shotgunBuffer;
                 source.connect(audioContext.destination);
                 source.start();
-            } else {
-                // minimal fallback (short noise)
-                const now = audioContext.currentTime;
-                const gain = audioContext.createGain();
-                gain.gain.setValueAtTime(0.3, now);
-                gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
-                gain.connect(audioContext.destination);
-                const osc = audioContext.createOscillator();
-                osc.type = "sawtooth";
-                osc.frequency.value = 150;
-                osc.connect(gain);
-                osc.start();
-                osc.stop(now + 0.2);
             }
         }
 
+        function playRandomBodyfallSound() {
+            if (!audioContext || !isAudioEnabled) return;
+            if (bodyFallSounds.length === 0) return;
+            const play = () => {
+                const source = audioContext.createBufferSource();
+                const gainNode = audioContext.createGain();
+                const randomIdx = Math.floor(Math.random() * bodyFallSounds.length);
+                source.buffer = bodyFallSounds[randomIdx];
+                source.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                gainNode.gain.value = 0.8;
+                source.start();
+            };
+            if (audioContext.state === 'suspended') {
+                audioContext.resume().then(play).catch(e=>console.log);
+            } else {
+                play();
+            }
+        }
+
+        // Рычание зомби с уменьшенным затуханием (maxDistance = высота экрана)
         function playRandomZombieSound(distance) {
             if (!audioContext || !isAudioEnabled) return;
             if (zombieSounds.length === 0) return;
-            const minDistance = 2 * PLAYER_RADIUS;
-            const maxDistance = CAM_VIEW_HEIGHT / 2;
+            const minDistance = 2 * PLAYER_RADIUS;      // 32 px
+            const maxDistance = CAM_VIEW_HEIGHT;        // 700 px
             let volume = 0;
             if (distance <= minDistance) volume = 1.35;
             else if (distance >= maxDistance) volume = 0;
@@ -410,7 +448,7 @@
             return { moveX, moveY };
         }
 
-        // ---------- HELPERS ----------
+        // ---------- HELPER FUNCTIONS ----------
         function getCurrentSpawnInterval() {
             let interval = SPAWN_INTERVAL_START - (gameTimeElapsed * SPAWN_INTERVAL_DECAY_RATE);
             if (interval < SPAWN_INTERVAL_MIN) interval = SPAWN_INTERVAL_MIN;
@@ -474,6 +512,7 @@
                     if (Math.hypot(p.x - e.x, p.y - e.y) < p.radius + e.radius) { hitIndex = j; break; }
                 }
                 if (hitIndex !== -1) {
+                    playRandomBodyfallSound();
                     enemies.splice(hitIndex,1);
                     score++;
                     saveHighScoreIfNeeded(score);
@@ -497,7 +536,7 @@
                 }
                 e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
                 e.y = Math.min(Math.max(e.y, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
-                if (distance < CAM_VIEW_HEIGHT/2 && gameActive && isAudioEnabled && zombieSounds.length>0) {
+                if (distance < CAM_VIEW_HEIGHT && gameActive && isAudioEnabled && zombieSounds.length>0) {
                     const now = nowSec;
                     if (e.lastGroanTime === 0) e.lastGroanTime = now + Math.random()*2;
                     if (now - e.lastGroanTime >= 2 + Math.random()*2) {
@@ -584,7 +623,7 @@
             if (now - lastShotTime >= SHOT_COOLDOWN) { fireShotgunAt(worldTarget.x, worldTarget.y, now); lastShotTime = now; }
         }
 
-        // ---------- RENDERING (canvas only: game objects + health bar) ----------
+        // ---------- RENDERING (canvas only) ----------
         function drawGrid() {
             const startX = Math.floor(cameraX/GRID_STEP)*GRID_STEP;
             const startY = Math.floor(cameraY/GRID_STEP)*GRID_STEP;
@@ -690,7 +729,6 @@
 
         // ---------- RESTART GAME ----------
         function restartGame() {
-            // reset all state
             gameActive = true;
             health = START_HEALTH;
             score = 0;
@@ -727,10 +765,7 @@
 
         loadHighScore();
         updateUI();
-        initGame();
-        function initGame() {
-            restartGame(); // same logic
-        }
+        function initGame() { restartGame(); }
 
         window.addEventListener('load', () => { initAudio().catch(e=>console.log); initGame(); requestAnimationFrame(gameLoop); });
         canvas.focus();
