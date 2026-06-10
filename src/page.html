@@ -223,6 +223,7 @@
             finalScoreSpan.textContent = score;
             finalBestSpan.textContent = highScore;
             gameoverPanel.style.visibility = "visible";
+            stopBackgroundMusic();  // Останавливаем музыку при проигрыше
         }
 
         function hideGameOverUI() {
@@ -258,12 +259,18 @@
         }
 
         function playBiteSound() {
-            if (!audioEnabled) return;
+            if (!audioEnabled) {
+                console.log("Bite sound blocked: audio not enabled");
+                return;
+            }
             try {
                 const audio = new Audio(BITE_PATH);
-                audio.volume = 1.25;
+                audio.volume = 1.0;
                 audio.play().catch(e => console.log("Bite play failed", e));
-            } catch(e) {}
+                console.log("Bite sound played"); // отладка
+            } catch(e) {
+                console.log("Bite exception", e);
+            }
         }
 
         function playRandomBodyfallSound() {
@@ -296,13 +303,37 @@
 
         function startBackgroundMusic() {
             if (!audioEnabled) return;
-            if (bgMusic) return; // уже запущена
+            if (bgMusic) {
+                // Если уже есть, просто запускаем с начала
+                bgMusic.currentTime = 0;
+                bgMusic.play().catch(e => console.log("Background resume failed", e));
+                return;
+            }
             try {
                 bgMusic = new Audio(THEME_PATH);
                 bgMusic.loop = true;
-                bgMusic.volume = 0.65; // негромко, чтобы не заглушать эффекты
+                bgMusic.volume = 0.65;
                 bgMusic.play().catch(e => console.log("Background music play failed", e));
             } catch(e) {}
+        }
+
+        function stopBackgroundMusic() {
+            if (bgMusic) {
+                bgMusic.pause();
+                bgMusic.currentTime = 0;
+                // не удаляем объект, чтобы можно было перезапустить
+            }
+        }
+
+        function restartBackgroundMusic() {
+            if (!audioEnabled) return;
+            if (bgMusic) {
+                bgMusic.pause();
+                bgMusic.currentTime = 0;
+                bgMusic.play().catch(e => console.log("Background restart failed", e));
+            } else {
+                startBackgroundMusic();
+            }
         }
 
         function enableAudio() {
@@ -346,7 +377,6 @@
         const SPREAD_ANGLE_RAD = SPREAD_ANGLE_DEG * Math.PI / 180;
         const ENEMY_RADIUS = 13;
         const ENEMY_COLOR = '#4CAF50';
-        // Базовая скорость увеличена в 1.5 раза: было 90, стало 135
         const ENEMY_BASE_SPEED = 135;
         const ACCELERATION_RADIUS = 9 * PLAYER_RADIUS;
         const ENEMY_ACCEL_FACTOR = 2.0;
@@ -493,7 +523,7 @@
                 if (dist < minDist) {
                     if (invincibleTimer <= 0 && gameActive) {
                         health--;
-                        playBiteSound();
+                        playBiteSound();  // <-- вызываем звук укуса
                         if (dist > 0.001) {
                             const angle = Math.atan2(dy, dx);
                             const knockX = Math.cos(angle) * KNOCKBACK_FORCE;
@@ -506,7 +536,11 @@
                                 player.velY = (player.velY / spd) * PLAYER_MAX_SPEED * 1.5;
                             }
                         }
-                        if (health <= 0) { health = 0; gameActive = false; showGameOverUI(); }
+                        if (health <= 0) {
+                            health = 0;
+                            gameActive = false;
+                            showGameOverUI();
+                        }
                         invincibleTimer = INVINCIBLE_DURATION;
                     }
                     if (dist < 0.001) continue;
@@ -700,7 +734,10 @@
             mouseWorldX = player.x; mouseWorldY = player.y;
             updateUI();
             hideGameOverUI();
-            // Музыка уже играет, не трогаем
+            // Перезапускаем музыку с начала
+            if (audioEnabled) {
+                restartBackgroundMusic();
+            }
         }
 
         // ---------- EVENT LISTENERS ----------
