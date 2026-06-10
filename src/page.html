@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-	<title>Vampire Survivors-like | Shotgun Arena</title>
+	<title>Vampire Survivors-like | Shotgun Arena | Camera Follow</title>
 	<style>
 		* {
 			margin: 0;
@@ -53,59 +53,68 @@
 		const canvas = document.getElementById('gameCanvas');
 		const ctx = canvas.getContext('2d');
 
+		// ---------- WORLD & CAMERA ----------
+		const WORLD_WIDTH = 4000;
+		const WORLD_HEIGHT = 4000;
+		const CAM_VIEW_WIDTH = canvas.width;
+		const CAM_VIEW_HEIGHT = canvas.height;
+
+		// Camera position (top-left corner of viewport in world coordinates)
+		let cameraX = 0, cameraY = 0;
+
 		// ---------- GAME CONSTANTS ----------
 		const BACKGROUND_COLOR = '#151e27';
 		const GRID_COLOR = '#253644';
+		const GRID_STEP = 60;      // grid spacing in world units
 
 		// Player settings
 		const PLAYER_RADIUS = 16;
 		const PLAYER_COLOR = '#2ad4ff';
-		const PLAYER_INVINCIBLE_COLOR = '#b0f0ff';
 		const PLAYER_SPEED = 340;          // pixels per second
 
-		// Health bar (above player)
-		const HEALTH_BAR_WIDTH = 40;        // width in pixels
+		// Health bar (above player, world space)
+		const HEALTH_BAR_WIDTH = 40;
 		const HEALTH_BAR_HEIGHT = 7;
-		const HEALTH_BAR_OFFSET_Y = -22;    // above player center
+		const HEALTH_BAR_OFFSET_Y = -22;    // above player center (world offset)
 
-		// Shotgun (pellets)
-		const SHOT_COOLDOWN = 0.8;          // seconds between shots
+		// Shotgun
+		const SHOT_COOLDOWN = 0.8;
 		const PELLET_COUNT_MIN = 5;
 		const PELLET_COUNT_MAX = 8;
 		const PELLET_RADIUS = 4;
-		const PELLET_SPEED = 430;           // px/sec
-		const PELLET_LIFESPAN = 0.65;        // seconds
+		const PELLET_SPEED = 430;
+		const PELLET_LIFESPAN = 0.65;
 		const PELLET_COLOR = '#FFD966';
-		const SPREAD_ANGLE_DEG = 25;         // ±25 degrees
+		const SPREAD_ANGLE_DEG = 25;
 		const SPREAD_ANGLE_RAD = SPREAD_ANGLE_DEG * Math.PI / 180;
 
 		// Enemy settings
 		const ENEMY_RADIUS = 13;
 		const ENEMY_COLOR = '#D64545';
-		const ENEMY_SPEED = 128;             // px/sec (toward player)
-		const ENEMY_HP = 1;                  // one-hit kill by pellet
+		const ENEMY_SPEED = 128;
+		const ENEMY_HP = 1;
 
-		// Spawn difficulty (interval shrinks over time)
-		const SPAWN_INTERVAL_START = 1.25;    // seconds between spawns at start
-		const SPAWN_INTERVAL_MIN = 0.32;      // minimum interval (high difficulty)
-		const SPAWN_INTERVAL_DECAY_RATE = 0.021; // per second: interval decreases by this each sec
+		// Spawn difficulty
+		const SPAWN_INTERVAL_START = 1.25;
+		const SPAWN_INTERVAL_MIN = 0.32;
+		const SPAWN_INTERVAL_DECAY_RATE = 0.021;
 
 		// Health & invincibility
 		const START_HEALTH = 5;
-		const INVINCIBLE_DURATION = 0.5;      // seconds after hit
+		const INVINCIBLE_DURATION = 0.5;
 
-		// Collision & boundaries
-		const MAP_WIDTH = canvas.width;
-		const MAP_HEIGHT = canvas.height;
+		// Enemy spawn distance from camera view (in world units)
+		const SPAWN_EXTRA_RADIUS = 250;   // enemies appear outside visible area + this margin
 
 		// ---------- GLOBAL STATE ----------
 		let gameActive = true;
 		let health = START_HEALTH;
-		let score = 0;                 // enemies killed
+		let score = 0;
 
+		// Player position (world)
 		let player = {
-			x: MAP_WIDTH / 2,
-			y: MAP_HEIGHT / 2,
+			x: WORLD_WIDTH / 2,
+			y: WORLD_HEIGHT / 2,
 			radius: PLAYER_RADIUS
 		};
 
@@ -130,24 +139,60 @@
 			return interval;
 		}
 
+		// Update camera to follow player (center of screen)
+		function updateCamera() {
+			// Target camera position (top-left) to center player
+			let targetX = player.x - CAM_VIEW_WIDTH / 2;
+			let targetY = player.y - CAM_VIEW_HEIGHT / 2;
+			// Clamp to world bounds
+			targetX = Math.min(Math.max(targetX, 0), WORLD_WIDTH - CAM_VIEW_WIDTH);
+			targetY = Math.min(Math.max(targetY, 0), WORLD_HEIGHT - CAM_VIEW_HEIGHT);
+			cameraX = targetX;
+			cameraY = targetY;
+		}
+
+		// Convert world coordinates to screen coordinates
+		function worldToScreen(worldX, worldY) {
+			return { x: worldX - cameraX, y: worldY - cameraY };
+		}
+
+		// Spawn enemy outside the current camera view (but within world bounds)
 		function spawnEnemy() {
-			const side = Math.floor(Math.random() * 4);
-			let x, y;
-			const pad = ENEMY_RADIUS + 2;
-			if (side === 0) {
-				x = -pad;
-				y = Math.random() * MAP_HEIGHT;
-			} else if (side === 1) {
-				x = MAP_WIDTH + pad;
-				y = Math.random() * MAP_HEIGHT;
-			} else if (side === 2) {
-				x = Math.random() * MAP_WIDTH;
-				y = -pad;
-			} else {
-				x = Math.random() * MAP_WIDTH;
-				y = MAP_HEIGHT + pad;
+			// Determine visible rectangle in world coordinates (with margin)
+			const viewLeft = cameraX;
+			const viewRight = cameraX + CAM_VIEW_WIDTH;
+			const viewTop = cameraY;
+			const viewBottom = cameraY + CAM_VIEW_HEIGHT;
+
+			// Expand spawn region outside the view
+			let spawnX, spawnY;
+			const side = Math.floor(Math.random() * 4); // 0:left,1:right,2:top,3:bottom
+			const margin = SPAWN_EXTRA_RADIUS;
+
+			if (side === 0) { // left of view
+				spawnX = viewLeft - margin - Math.random() * (margin * 0.8);
+				spawnY = viewTop + Math.random() * CAM_VIEW_HEIGHT;
+			} else if (side === 1) { // right of view
+				spawnX = viewRight + margin + Math.random() * (margin * 0.8);
+				spawnY = viewTop + Math.random() * CAM_VIEW_HEIGHT;
+			} else if (side === 2) { // top
+				spawnX = viewLeft + Math.random() * CAM_VIEW_WIDTH;
+				spawnY = viewTop - margin - Math.random() * (margin * 0.8);
+			} else { // bottom
+				spawnX = viewLeft + Math.random() * CAM_VIEW_WIDTH;
+				spawnY = viewBottom + margin + Math.random() * (margin * 0.8);
 			}
-			enemies.push({ x, y, radius: ENEMY_RADIUS, hp: ENEMY_HP });
+
+			// Clamp to world boundaries (with enemy radius padding)
+			spawnX = Math.min(Math.max(spawnX, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
+			spawnY = Math.min(Math.max(spawnY, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
+
+			enemies.push({
+				x: spawnX,
+				y: spawnY,
+				radius: ENEMY_RADIUS,
+				hp: ENEMY_HP
+			});
 		}
 
 		function findNearestEnemy() {
@@ -196,6 +241,11 @@
 					pellets.splice(i,1);
 					continue;
 				}
+				// Remove if outside world (optional, but prevents infinite travel)
+				if (p.x < -500 || p.x > WORLD_WIDTH+500 || p.y < -500 || p.y > WORLD_HEIGHT+500) {
+					pellets.splice(i,1);
+					continue;
+				}
 				let hitIndex = -1;
 				for (let j = 0; j < enemies.length; j++) {
 					const e = enemies[j];
@@ -227,10 +277,12 @@
 					e.x += stepX;
 					e.y += stepY;
 				}
-				e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), MAP_WIDTH - ENEMY_RADIUS);
-				e.y = Math.min(Math.max(e.y, ENEMY_RADIUS), MAP_HEIGHT - ENEMY_RADIUS);
+				// Keep enemy inside world boundaries
+				e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
+				e.y = Math.min(Math.max(e.y, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
 			}
 
+			// Player-enemy collision and damage
 			for (let i = 0; i < enemies.length; i++) {
 				const e = enemies[i];
 				const dx = player.x - e.x;
@@ -246,6 +298,7 @@
 						}
 						invincibleTimer = INVINCIBLE_DURATION;
 					}
+					// push enemy away
 					if (dist < 0.001) continue;
 					const overlap = minDist - dist;
 					const angle = Math.atan2(dy, dx);
@@ -253,8 +306,9 @@
 					const pushY = Math.sin(angle) * overlap;
 					e.x -= pushX;
 					e.y -= pushY;
-					e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), MAP_WIDTH - ENEMY_RADIUS);
-					e.y = Math.min(Math.max(e.y, ENEMY_RADIUS), MAP_HEIGHT - ENEMY_RADIUS);
+					// re-clamp after push
+					e.x = Math.min(Math.max(e.x, ENEMY_RADIUS), WORLD_WIDTH - ENEMY_RADIUS);
+					e.y = Math.min(Math.max(e.y, ENEMY_RADIUS), WORLD_HEIGHT - ENEMY_RADIUS);
 				}
 			}
 		}
@@ -272,8 +326,9 @@
 			}
 			let newX = player.x + moveX * PLAYER_SPEED * deltaTime;
 			let newY = player.y + moveY * PLAYER_SPEED * deltaTime;
-			newX = Math.min(Math.max(newX, PLAYER_RADIUS), MAP_WIDTH - PLAYER_RADIUS);
-			newY = Math.min(Math.max(newY, PLAYER_RADIUS), MAP_HEIGHT - PLAYER_RADIUS);
+			// World boundaries
+			newX = Math.min(Math.max(newX, PLAYER_RADIUS), WORLD_WIDTH - PLAYER_RADIUS);
+			newY = Math.min(Math.max(newY, PLAYER_RADIUS), WORLD_HEIGHT - PLAYER_RADIUS);
 			player.x = newX;
 			player.y = newY;
 		}
@@ -302,45 +357,52 @@
 			}
 		}
 
-		// ---------- RENDERING (health bar above player instead of text) ----------
+		// ---------- RENDERING (with camera transformation) ----------
 		function drawGrid() {
+			// Calculate visible grid range
+			const startX = Math.floor(cameraX / GRID_STEP) * GRID_STEP;
+			const startY = Math.floor(cameraY / GRID_STEP) * GRID_STEP;
 			ctx.strokeStyle = GRID_COLOR;
 			ctx.lineWidth = 0.8;
-			const step = 40;
-			for (let x = 0; x < MAP_WIDTH; x += step) {
-				ctx.beginPath();
-				ctx.moveTo(x, 0);
-				ctx.lineTo(x, MAP_HEIGHT);
-				ctx.stroke();
+			for (let x = startX; x < cameraX + CAM_VIEW_WIDTH + GRID_STEP; x += GRID_STEP) {
+				const screenX = x - cameraX;
+				if (screenX >= 0 && screenX <= CAM_VIEW_WIDTH) {
+					ctx.beginPath();
+					ctx.moveTo(screenX, 0);
+					ctx.lineTo(screenX, CAM_VIEW_HEIGHT);
+					ctx.stroke();
+				}
 			}
-			for (let y = 0; y < MAP_HEIGHT; y += step) {
-				ctx.beginPath();
-				ctx.moveTo(0, y);
-				ctx.lineTo(MAP_WIDTH, y);
-				ctx.stroke();
+			for (let y = startY; y < cameraY + CAM_VIEW_HEIGHT + GRID_STEP; y += GRID_STEP) {
+				const screenY = y - cameraY;
+				if (screenY >= 0 && screenY <= CAM_VIEW_HEIGHT) {
+					ctx.beginPath();
+					ctx.moveTo(0, screenY);
+					ctx.lineTo(CAM_VIEW_WIDTH, screenY);
+					ctx.stroke();
+				}
 			}
 		}
 
-		// Draw a health progress bar above the player
 		function drawHealthBarAbovePlayer() {
 			if (health <= 0) return;
-			const barX = player.x - HEALTH_BAR_WIDTH / 2;
-			const barY = player.y + HEALTH_BAR_OFFSET_Y;
-			// background (dark red)
+			const screenPos = worldToScreen(player.x, player.y);
+			const barX = screenPos.x - HEALTH_BAR_WIDTH / 2;
+			const barY = screenPos.y + HEALTH_BAR_OFFSET_Y;
+			// background
 			ctx.fillStyle = '#4a1a1a';
 			ctx.fillRect(barX, barY, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT);
-			// current health (bright red)
 			const healthPercent = health / START_HEALTH;
 			const fillWidth = HEALTH_BAR_WIDTH * healthPercent;
 			ctx.fillStyle = '#e34d4d';
 			ctx.fillRect(barX, barY, fillWidth, HEALTH_BAR_HEIGHT);
-			// outline
 			ctx.strokeStyle = '#2c2c2c';
 			ctx.lineWidth = 1;
 			ctx.strokeRect(barX, barY, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT);
 		}
 
 		function drawPlayer() {
+			const pos = worldToScreen(player.x, player.y);
 			let isInvincible = (invincibleTimer > 0 && gameActive);
 			if (isInvincible && (Math.floor(Date.now() / 50) % 3 < 1)) {
 				ctx.globalAlpha = 0.55;
@@ -350,18 +412,18 @@
 			ctx.shadowBlur = 10;
 			ctx.shadowColor = "#00ccff80";
 			ctx.beginPath();
-			ctx.arc(player.x, player.y, PLAYER_RADIUS, 0, Math.PI*2);
+			ctx.arc(pos.x, pos.y, PLAYER_RADIUS, 0, Math.PI*2);
 			ctx.fillStyle = PLAYER_COLOR;
 			ctx.fill();
 			ctx.strokeStyle = "#ffffffcc";
 			ctx.lineWidth = 2;
 			ctx.stroke();
 			ctx.beginPath();
-			ctx.arc(player.x, player.y, PLAYER_RADIUS-3, 0, Math.PI*2);
+			ctx.arc(pos.x, pos.y, PLAYER_RADIUS-3, 0, Math.PI*2);
 			ctx.fillStyle = "#88ffff80";
 			ctx.fill();
 
-			// Reload indicator (ring around player)
+			// Reload indicator
 			if (gameActive && enemies.length > 0) {
 				const now = performance.now() / 1000;
 				const timeSinceLastShot = now - lastShotTime;
@@ -373,10 +435,9 @@
 					const startAngle = -Math.PI / 2;
 					const endAngle = startAngle + (Math.PI * 2 * progress);
 					ctx.beginPath();
-					ctx.arc(player.x, player.y, radius, startAngle, endAngle);
+					ctx.arc(pos.x, pos.y, radius, startAngle, endAngle);
 					ctx.lineWidth = 3;
 					ctx.strokeStyle = "#FFE484";
-					ctx.shadowBlur = 4;
 					ctx.stroke();
 				}
 			}
@@ -386,28 +447,35 @@
 
 		function drawEnemies() {
 			for (const e of enemies) {
+				const screenPos = worldToScreen(e.x, e.y);
+				// Skip if outside visible area + margin (optimization)
+				if (screenPos.x + ENEMY_RADIUS < 0 || screenPos.x - ENEMY_RADIUS > CAM_VIEW_WIDTH ||
+					screenPos.y + ENEMY_RADIUS < 0 || screenPos.y - ENEMY_RADIUS > CAM_VIEW_HEIGHT) {
+					continue;
+				}
 				ctx.shadowBlur = 8;
 				ctx.shadowColor = "#b00000";
 				ctx.beginPath();
-				ctx.arc(e.x, e.y, ENEMY_RADIUS, 0, Math.PI*2);
+				ctx.arc(screenPos.x, screenPos.y, ENEMY_RADIUS, 0, Math.PI*2);
 				ctx.fillStyle = ENEMY_COLOR;
 				ctx.fill();
 				ctx.strokeStyle = "#ff8080";
 				ctx.lineWidth = 1.5;
 				ctx.stroke();
+				// eyes
 				ctx.beginPath();
-				ctx.arc(e.x-4, e.y-3, 3, 0, Math.PI*2);
+				ctx.arc(screenPos.x-4, screenPos.y-3, 3, 0, Math.PI*2);
 				ctx.fillStyle = "#ffffff";
 				ctx.fill();
 				ctx.beginPath();
-				ctx.arc(e.x+4, e.y-3, 3, 0, Math.PI*2);
+				ctx.arc(screenPos.x+4, screenPos.y-3, 3, 0, Math.PI*2);
 				ctx.fill();
 				ctx.fillStyle = "#000000";
 				ctx.beginPath();
-				ctx.arc(e.x-4.5, e.y-4, 1.2, 0, Math.PI*2);
+				ctx.arc(screenPos.x-4.5, screenPos.y-4, 1.2, 0, Math.PI*2);
 				ctx.fill();
 				ctx.beginPath();
-				ctx.arc(e.x+3.5, e.y-4, 1.2, 0, Math.PI*2);
+				ctx.arc(screenPos.x+3.5, screenPos.y-4, 1.2, 0, Math.PI*2);
 				ctx.fill();
 			}
 			ctx.shadowBlur = 0;
@@ -415,47 +483,52 @@
 
 		function drawPellets() {
 			for (const p of pellets) {
+				const screenPos = worldToScreen(p.x, p.y);
+				if (screenPos.x + PELLET_RADIUS < 0 || screenPos.x - PELLET_RADIUS > CAM_VIEW_WIDTH ||
+					screenPos.y + PELLET_RADIUS < 0 || screenPos.y - PELLET_RADIUS > CAM_VIEW_HEIGHT) {
+					continue;
+				}
 				ctx.beginPath();
-				ctx.arc(p.x, p.y, PELLET_RADIUS-1, 0, Math.PI*2);
+				ctx.arc(screenPos.x, screenPos.y, PELLET_RADIUS-1, 0, Math.PI*2);
 				ctx.fillStyle = PELLET_COLOR;
 				ctx.fill();
 				ctx.beginPath();
-				ctx.arc(p.x, p.y, PELLET_RADIUS-2, 0, Math.PI*2);
+				ctx.arc(screenPos.x, screenPos.y, PELLET_RADIUS-2, 0, Math.PI*2);
 				ctx.fillStyle = "#FFAA33";
 				ctx.fill();
 			}
 		}
 
 		function drawUI() {
-			// Score only (top-right corner)
+			// Score is screen-fixed
 			ctx.font = "bold 26 'Courier New', monospace";
 			ctx.shadowBlur = 0;
 			ctx.fillStyle = "#f3d382";
-			ctx.fillText(`🎯 ${score}`, MAP_WIDTH - 135, 52);
+			ctx.fillText(`🎯 ${score}`, CAM_VIEW_WIDTH - 135, 52);
 			ctx.font = "bold 18 monospace";
 			ctx.fillStyle = "#afd5ff";
-			ctx.fillText("⚡ AUTO SHOTGUN", MAP_WIDTH - 210, 100);
+			ctx.fillText("⚡ AUTO SHOTGUN", CAM_VIEW_WIDTH - 210, 100);
 		}
 
 		function drawGameOver() {
 			ctx.globalAlpha = 0.85;
 			ctx.fillStyle = "#02040c";
-			ctx.fillRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+			ctx.fillRect(0, 0, CAM_VIEW_WIDTH, CAM_VIEW_HEIGHT);
 			ctx.globalAlpha = 1;
 			ctx.font = "800 48 'Courier New', monospace";
 			ctx.fillStyle = "#f04e4e";
-			ctx.fillText("GAME OVER", MAP_WIDTH/2 - 150, MAP_HEIGHT/2 - 50);
+			ctx.fillText("GAME OVER", CAM_VIEW_WIDTH/2 - 150, CAM_VIEW_HEIGHT/2 - 50);
 			ctx.font = "28 monospace";
 			ctx.fillStyle = "#ddbb77";
-			ctx.fillText(`FINAL SCORE: ${score}`, MAP_WIDTH/2 - 130, MAP_HEIGHT/2 + 40);
+			ctx.fillText(`FINAL SCORE: ${score}`, CAM_VIEW_WIDTH/2 - 130, CAM_VIEW_HEIGHT/2 + 40);
 			ctx.font = "16 monospace";
 			ctx.fillStyle = "#aaaaaa";
-			ctx.fillText("press F5 or refresh to restart", MAP_WIDTH/2 - 150, MAP_HEIGHT/2 + 110);
+			ctx.fillText("press F5 or refresh to restart", CAM_VIEW_WIDTH/2 - 150, CAM_VIEW_HEIGHT/2 + 110);
 		}
 
 		function drawBackground() {
 			ctx.fillStyle = BACKGROUND_COLOR;
-			ctx.fillRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+			ctx.fillRect(0, 0, CAM_VIEW_WIDTH, CAM_VIEW_HEIGHT);
 			drawGrid();
 		}
 
@@ -485,18 +558,22 @@
 
 			if (gameActive) {
 				updatePlayer(deltaTime);
+				updateCamera();          // camera follows player
 				updateEnemies(deltaTime);
 				updatePellets(deltaTime, nowSec);
 				updateInvincibility(deltaTime);
 				trySpawnEnemy(nowSec);
 				tryAutoShoot(nowSec);
+			} else {
+				// still update camera to show player position after death
+				updateCamera();
 			}
 
 			drawBackground();
 			drawPellets();
 			drawEnemies();
 			drawPlayer();
-			drawHealthBarAbovePlayer();   // health bar above player's head
+			drawHealthBarAbovePlayer();
 			drawUI();
 
 			if (!gameActive) {
@@ -539,14 +616,16 @@
 			gameActive = true;
 			invincibleTimer = 0;
 			gameTimeElapsed = 0;
-			player.x = MAP_WIDTH/2;
-			player.y = MAP_HEIGHT/2;
+			player.x = WORLD_WIDTH / 2;
+			player.y = WORLD_HEIGHT / 2;
 			const nowPerf = performance.now() / 1000;
 			lastSpawnTime = nowPerf;
 			lastShotTime = nowPerf;
+			// initial spawn of a few enemies
 			for (let i = 0; i < 3; i++) {
 				spawnEnemy();
 			}
+			updateCamera();
 		}
 
 		initGame();
